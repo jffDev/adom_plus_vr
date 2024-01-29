@@ -582,7 +582,6 @@ class BEERplusVR_optimizer(Optimizer):
     """
     Implementation of the BEER+VR optimizer
     """
-
     def __init__(self, f, data, labels, dataw, mu=1, L=1, chi=1, batch_size=10, ):
         super().__init__(f, data, labels)
         """"
@@ -611,18 +610,24 @@ class BEERplusVR_optimizer(Optimizer):
 
 
     def compute_grads(self,):
-        print("self.data.shape", self.data.shape)
-        print("self.labels.shape", self.labels.shape)
-        print("f.theta_i compute_grads", self.f.theta_i.shape)
 
-        loss = torch.sum(self.f(self.data, self.labels))
+        self.f.zero_grad()
+
+        data = self.data  # shape [n_workers, n_data_per_worker, dim]
+        labels = self.labels  # shape [n_workers, n_data_per_worker, 1]
+
+        idx = np.random.randint(0, self.data.shape[1], self.batch_size)
+
+        data = data[:, idx, :]  # shape [n_workers, batch_size_data_per_worker, dim]
+        labels = labels[:, idx, :]  # shape [n_workers, batch_size_data_per_worker, 1]
+
+        loss = torch.sum(self.f(data, labels))
         loss.backward()
 
     def update_params_f(self, X):
         """
         Replace the previous parameters with X_update.
         """
-        print("f.theta_i update_params_f", self.f.theta_i.shape)
         for xi in self.f.parameters():
             xi.data = X.detach().clone().unsqueeze(-1)
 
@@ -647,43 +652,33 @@ class BEERplusVR_optimizer(Optimizer):
 
     def initialize(self, ):
 
-        self.d = self.data.shape[2]
-        self.m = self.data.shape[0]
-
-        self.I_d = torch.eye(self.d)
-        self.I_m = torch.eye(self.m)
+        self.n = self.data.shape[0]
+        self.I_n = torch.eye(self.n)
 
         self.compute_grads()
         X, grad_X = self.get_grads()
         self.X = X
-
         self.Y = grad_X
-        self.V = 1/self.m * (np.kron(np.ones(self.m) @ np.ones(self.m).T, np.ones(self.d))) @ self.Y
 
-        self.p = np.sqrt(n)
+        self.V = self.Y / self.n
+        self.p = 1 / np.sqrt(self.n)
+        self.grad_previous = self.V
 
     def step(self, W):
-        print("W step", W.shape)
-        print("self.X step", self.X.shape)
-        # self.update_params_f(self.X)
-        # self.compute_grads()
-        # X, grad_X = self.get_grads()
-
-        M = self.I_d - (self.I_m - W)
-
-        X_new = M @ self.X - self.eta * self.V
+        X_new = (torch.eye(W.shape[0]) - W) @ self.X - self.eta * self.V
 
         self.update_params_f(X_new)
         self.compute_grads()
-        grad_X_new = self.get_grads()
+        X, grad = self.get_grads()
 
-        grad = self.Y + grad_X_new - self.Y
+        delta = self.Y + grad - self.grad_previous
 
-        ar = [grad_X_new, grad]
+        ar = [grad, delta]
         r = np.random.choice([0, 1], 1, p=[self.p, 1 - self.p])
         Y_new = ar[r[0]]
-        V_new = M @ self.V + Y_new - self.Y
+        V_new = (torch.eye(W.shape[0]) - W) @ self.V + Y_new - self.Y
 
+        self.grad_previous = grad
         self.Y = Y_new
         self.V = V_new
         self.X = X_new

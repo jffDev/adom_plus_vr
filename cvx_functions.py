@@ -47,8 +47,6 @@ class logistic_regression(nn.Module):
             self.theta_i = nn.Parameter(
                 torch.randn((n_workers, dim, 1)).double(), requires_grad=True
             )
-        # print("X", X.shape)
-        print("self.theta_i init", self.theta_i.shape)
 
     def forward(self, X, y):
         """
@@ -63,8 +61,6 @@ class logistic_regression(nn.Module):
             - out (torch.tensor): of shape [n_workers, 1],
                                   the values of f_i(\theta, X, y)
         """
-        print("X", X.shape)
-        print("self.theta_i", self.theta_i.shape)
         # apply the batch dot product between the parameters and the data
         if self.centralized:
             out = torch.matmul(

@@ -212,13 +212,9 @@ def main(args):
             ]
         ]
     )
-    print("before run opt")
-    print("f.theta_i", f.theta_i.shape)
-    print("before run opt")
     # RUN THE DECENTRALIZED OPTIMIZER
     optimizer, loss_list, loss_list_edges = run_optimizer(args, f, x_star, time_now)
 
-    print("after run opt")
 
     # # SAVES THE DATA FROM THE RUN
     # save_data(
@@ -263,7 +259,8 @@ def main(args):
                 )
             X = torch.cat(X)
         X_bar = torch.mean(X, dim=0)
-        print("X_bar", X_bar.shape)
+        #
+
         f.centralized = True
         f.theta_i = nn.Parameter(X_bar.unsqueeze(-1))
         print(

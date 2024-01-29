@@ -355,14 +355,14 @@ def run_ADOMplusVR(
     else:
         n_matrix = 1
     # Run ADOM+VR
-    print("n_steps: ",n_steps)
     for k in trange(n_steps):
         # compute the multi-consensus matrix
         W_final = torch.eye(n_workers).double()
+
         n_edges = 0
         for q in range(n_matrix):
             # apply the procedure described in eq. 18 of the paper.
-            W_final = W_final @ (In - list_W[k_mixing % len(list_W)]) # TODO!
+            W_final = W_final @ (In - list_W[k_mixing % len(list_W)])
             G = list_G[k_mixing % len(list_G)]
             n_edges += len(G.edges)
             k_mixing += 1
@@ -418,7 +418,6 @@ def run_BEERplusVR(
         time_now,
         graph_type,
 ):
-    print("f.theta_i run_BEERplusVR", f.theta_i.shape)
     optimizer = BEERplusVR_optimizer(f, data, labels, dataw=data,  mu=mu, L=L, chi=chi)
     # Initialization of the optimization procedure
     k_mixing = 0
@@ -439,7 +438,6 @@ def run_BEERplusVR(
     else:
         n_matrix = 1
     # Run BEER+VR
-    print("n_steps: ",n_steps)
     for k in trange(n_steps):
         # compute the multi-consensus matrix
         W_final = torch.eye(n_workers).double()
