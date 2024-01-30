@@ -170,9 +170,13 @@ def print_communication_rates_fixed_topology(
         " Communication rates for the different methods on the %s graph with %d nodes. \n We print the expected number of edges activated between two expected global rounds of gradient steps. \n"
         % (graph_type, n_workers)
     )
+    # print(
+    #     " ADOM+ (ADOM+VR): %d \n ADOM+ (ADOM+VR) with Multi-Consensus : %d \n Continuized : %d \n MSDA : %d \n DADAO : %d"
+    #     % (n_edges, rate_adom, rate_async, rate_msda, rate_async)
+    # )
     print(
-        " ADOM+ (ADOM+VR): %d \n ADOM+ (ADOM+VR) with Multi-Consensus : %d \n Continuized : %d \n MSDA : %d \n DADAO : %d"
-        % (n_edges, rate_adom, rate_async, rate_msda, rate_async)
+        " ADOM+ (ADOM+VR): %d \n ADOM+ (ADOM+VR) with Multi-Consensus : %d "
+        % (n_edges, rate_adom)
     )
 
 

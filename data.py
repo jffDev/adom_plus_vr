@@ -3,6 +3,9 @@ import numpy as np
 import scipy
 import networkx as nx
 from sklearn import datasets
+import utils
+import importlib
+importlib.reload(utils)
 from utils import compute_spectral_quantities
 from sklearn.datasets import load_svmlight_file
 import torch

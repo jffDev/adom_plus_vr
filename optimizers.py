@@ -448,18 +448,18 @@ class ADOMplusVR_optimizer(Optimizer):
         dataw = dataw[:, idx, :]  # shape [n_workers, batch_size_data_per_worker, dim]
         labels = labels[:, idx, :]  # shape [n_workers, batch_size_data_per_worker, 1]
 
-        n = self.data.shape[0]
-        L_i = []
-        for i in range(n):
-            d_i = data[i]
-            eigs = torch.linalg.eigh(d_i.T @ d_i)
-            L_i.append(eigs[0][-1])
+        # n = self.data.shape[0]
+        # L_i = []
+        # for i in range(n):
+        #     d_i = data[i]
+        #     eigs = torch.linalg.eigh(d_i.T @ d_i)
+        #     L_i.append(eigs[0][-1])
+        #
+        # L_i = torch.tensor(L_i)
+        # p = max(L_i) / torch.mean(L_i)
 
-        L_i = torch.tensor(L_i)
-        p = max(L_i) / torch.mean(L_i)
-
-        loss = (torch.sum(1/(p*n)*(self.f(data, labels) - self.f(dataw, labels)))) / self.batch_size + torch.sum(self.f(self.dataw, self.labels))
-        # loss = (torch.sum((self.f(data, labels) - self.f(dataw, labels)))) / self.batch_size + torch.sum(self.f(self.dataw, self.labels))
+        # loss = (torch.sum(1/(p*n)*(self.f(data, labels) - self.f(dataw, labels)))) / self.batch_size + torch.sum(self.f(self.dataw, self.labels))
+        loss = (torch.sum((self.f(data, labels) - self.f(dataw, labels)))) / self.batch_size + torch.sum(self.f(self.dataw, self.labels))
         loss.backward()
 
     def update_params_f(self, X, w):
@@ -620,7 +620,7 @@ class BEERplusVR_optimizer(Optimizer):
         data = data[:, idx, :]  # shape [n_workers, batch_size_data_per_worker, dim]
         labels = labels[:, idx, :]  # shape [n_workers, batch_size_data_per_worker, 1]
 
-        loss = torch.sum(self.f(data, labels))
+        loss = torch.sum(self.f(data, labels)) / self.batch_size
         loss.backward()
 
     def update_params_f(self, X):
@@ -653,6 +653,7 @@ class BEERplusVR_optimizer(Optimizer):
 
         self.n = self.data.shape[0]
         self.I_n = torch.eye(self.n)
+        self.eta = 1e-3
 
         self.compute_grads()
         X, grad_X = self.get_grads()
@@ -661,7 +662,7 @@ class BEERplusVR_optimizer(Optimizer):
 
         self.V = self.Y / self.n
         self.p = 1 / np.sqrt(self.n)
-        self.grad_previous = self.V
+        self.grad_previous = grad_X
 
     def step(self, W):
         X_new = (torch.eye(W.shape[0]) - W) @ self.X - self.eta * self.V
@@ -729,10 +730,10 @@ class AccGT_optimizer(Optimizer):
         self.X = X
         self.Y = X
         self.Z = X
-        self.s_prev = grad
+        self.s_previous = grad
         self.grad_previous = grad
 
-        self.alpha = self.mu / 2
+        self.alpha = 1e-8
         self.theta = np.sqrt(self.mu * self.alpha) / 2
 
     def step(self, W):
@@ -743,14 +744,15 @@ class AccGT_optimizer(Optimizer):
         self.compute_grads()
         X, grad = self.get_grads()
 
-        s = W @ self.s_prev + grad - self.grad_previous
+        s = W @ self.s_previous + grad - self.grad_previous
 
-        Z_new = 1 / (1 + self.mu * self.alpha  / self.theta) * (
-                W @ (self.mu * self.alpha * self.Y / self.theta) - self.alpha * s / self.theta
+        self.Z = 1 / (1 + self.mu * self.alpha / self.theta) * (
+            W @ (self.mu * self.alpha * self.Y / self.theta + self.Z) - self.alpha * s / self.theta
         )
+        self.X = self.theta * self.Z + (1 - self.theta) * W @ self.X
 
-        self.X = self.theta * Z_new + (1 - self.theta) * W @ self.X
         self.grad_previous = grad
+        self.s_previous = s
 
 
 class Continuized_optimizer:
