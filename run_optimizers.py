@@ -16,6 +16,7 @@ from optimizers import (
     ADOMplus_optimizer,
     ADOMplusVR_optimizer,
     BEERplusVR_optimizer,
+    AccGT_optimizer,
     Continuized_optimizer,
     MSDA_optimizer,
 )
@@ -459,29 +460,65 @@ def run_BEERplusVR(
             loss_list_edges = (
                     loss_list_edges + [loss] * n_edges
             )  # n_edges counted the total number of edges activated
-        # regularly save the data from the runs
-        # if k % 10000 == 0:
-        #     save_data(
-        #         loss_list,
-        #         time_now,
-        #         "ADOM+VR",
-        #         use_multi_consensus,
-        #         False,
-        #         graph_type,
-        #         n_workers,
-        #         is_loss_comp=True,
-        #     )
-        #     save_data(
-        #         loss_list_edges,
-        #         time_now,
-        #         "ADOM+VR",
-        #         use_multi_consensus,
-        #         False,
-        #         graph_type,
-        #         n_workers,
-        #         is_loss_comp=False,
-        #     )
+    return optimizer, loss_list, loss_list_edges
 
+def run_AccGT(
+        n_workers,
+        n_steps,
+        chi,
+        f,
+        mu,
+        L,
+        data,
+        labels,
+        x_star,
+        list_G,
+        list_W,
+        use_multi_consensus,
+        time_now,
+        graph_type,
+):
+    optimizer = AccGT_optimizer(f, data, labels, dataw=data,  mu=mu, L=L, chi=chi)
+    # Initialization of the optimization procedure
+    k_mixing = 0
+    In = torch.eye(n_workers).double()
+    loss_list = []
+    loss_list_edges = []
+    if use_multi_consensus:
+        n_matrix = int(np.ceil(chi * np.log(2)))
+        # if we use multi-consensus, it amounts to changing the
+        # effective chi of the communication matrices used.
+        # Equation 20 of ( https://openreview.net/forum?id=L8-54wkift )
+        # shows that the target value of chi used is 2 for M.C.
+        # We thus change the value of chi in the optimizer,
+        # only if n_matrix > 1
+        if n_matrix > 1:
+            optimizer.chi = 2
+            optimizer.initialize()
+    else:
+        n_matrix = 1
+    # Run Acc-GT
+    for k in trange(n_steps):
+        # compute the multi-consensus matrix
+        W_final = torch.eye(n_workers).double()
+        n_edges = 0
+        for q in range(n_matrix):
+            # apply the procedure described in eq. 18 of the paper.
+            W_final = W_final @ (In - list_W[k_mixing % len(list_W)])
+            G = list_G[k_mixing % len(list_G)]
+            n_edges += len(G.edges)
+            k_mixing += 1
+        # take a gradient step
+        optimizer.step(W_final)
+        # compute distance to optimal params
+        with torch.no_grad():
+            loss = compute_average_distance_to_opt(optimizer.X, x_star)
+            loss_list = (
+                    loss_list + [loss] * n_workers
+            )  # we take n gradients at each round
+            loss_list_edges = (
+                    loss_list_edges + [loss] * n_edges
+            )  # n_edges counted the total number of edges activated
     return optimizer, loss_list, loss_list_edges
 
 
@@ -749,6 +786,23 @@ def run_optimizer(args, f, x_star, time_now):
         )
     elif args.optimizer_name == "BEERplusVR":
         optimizer, loss_list, loss_list_edges = run_BEERplusVR(
+            args.n_workers,
+            int(args.steps),
+            args.chi,
+            f,
+            args.mu,
+            args.L,
+            args.data,
+            args.labels,
+            x_star,
+            args.list_G,
+            args.list_W,
+            args.use_multi_consensus,
+            time_now,
+            args.graph_type,
+        )
+    elif args.optimizer_name == "AccGT":
+        optimizer, loss_list, loss_list_edges = run_AccGT(
             args.n_workers,
             int(args.steps),
             args.chi,

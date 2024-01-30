@@ -456,11 +456,10 @@ class ADOMplusVR_optimizer(Optimizer):
             L_i.append(eigs[0][-1])
 
         L_i = torch.tensor(L_i)
-        l_ = max(L_i)
-        L_i = torch.mean(L_i)
-        p = l_ / L_i
+        p = max(L_i) / torch.mean(L_i)
 
         loss = (torch.sum(1/(p*n)*(self.f(data, labels) - self.f(dataw, labels)))) / self.batch_size + torch.sum(self.f(self.dataw, self.labels))
+        # loss = (torch.sum((self.f(data, labels) - self.f(dataw, labels)))) / self.batch_size + torch.sum(self.f(self.dataw, self.labels))
         loss.backward()
 
     def update_params_f(self, X, w):
@@ -682,6 +681,76 @@ class BEERplusVR_optimizer(Optimizer):
         self.Y = Y_new
         self.V = V_new
         self.X = X_new
+
+class AccGT_optimizer(Optimizer):
+    """
+    Implementation of the AccGT optimizer
+    """
+    def __init__(self, f, data, labels, dataw, mu=1, L=1, chi=1, batch_size=10, ):
+        super().__init__(f, data, labels)
+        """"
+        Parameters:
+            - f (nn.Module): the convex function to optimize.
+            - data (torch.tensor): of shape [n_workers, n_data_per_worker, dim]
+                                   the data points at each worker.
+            - labels (torch.tensor): of shape [n_workers, n_data_per_worker, 1]
+                                     the labels of each data point.
+            - mu (float): the strong convexity coefficient.
+            - L (float): the smoothness coefficient.
+            - chi (float): for the matrices considers, equals \frac{\lambda_max}{\lambda_min^+}
+                           of the graph's Laplacians, see page 4 of the paper.
+        """
+        self.dataw = dataw
+        self.batch_size = batch_size
+        self.L = L
+        self.mu = mu
+        self.chi = chi
+        self.asynchronous = False
+        self.f = f
+
+        self.eta = 0.1
+        self.batch_size = batch_size
+        self.initialize()
+
+
+    def compute_grads(self,):
+
+        self.f.zero_grad()
+        loss = torch.sum(self.f(self.data, self.labels))
+        loss.backward()
+
+    def initialize(self, ):
+        self.n = self.data.shape[0]
+        self.I_n = torch.eye(self.n)
+
+        self.compute_grads()
+        X, grad = self.get_grads()
+
+        self.X = X
+        self.Y = X
+        self.Z = X
+        self.s_prev = grad
+        self.grad_previous = grad
+
+        self.alpha = self.mu / 2
+        self.theta = np.sqrt(self.mu * self.alpha) / 2
+
+    def step(self, W):
+
+        self.Y = self.theta * self.Z + (1 - self.theta) * self.X
+
+        self.update_params_f(self.Y)
+        self.compute_grads()
+        X, grad = self.get_grads()
+
+        s = W @ self.s_prev + grad - self.grad_previous
+
+        Z_new = 1 / (1 + self.mu * self.alpha  / self.theta) * (
+                W @ (self.mu * self.alpha * self.Y / self.theta) - self.alpha * s / self.theta
+        )
+
+        self.X = self.theta * Z_new + (1 - self.theta) * W @ self.X
+        self.grad_previous = grad
 
 
 class Continuized_optimizer:
