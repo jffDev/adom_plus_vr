@@ -521,7 +521,6 @@ def run_AccGT(
             )  # n_edges counted the total number of edges activated
     return optimizer, loss_list, loss_list_edges
 
-
 def run_continuized(
     n_workers,
     t_max,
@@ -818,6 +817,23 @@ def run_optimizer(args, f, x_star, time_now):
             time_now,
             args.graph_type,
         )
+    # elif args.optimizer_name == "ADFS":
+    #     optimizer, loss_list, loss_list_edges = run_ADFS(
+    #         args.n_workers,
+    #         int(args.steps),
+    #         args.chi,
+    #         f,
+    #         args.mu,
+    #         args.L,
+    #         args.data,
+    #         args.labels,
+    #         x_star,
+    #         args.list_G,
+    #         args.list_W,
+    #         args.use_multi_consensus,
+    #         time_now,
+    #         args.graph_type,
+    #     )
     elif args.optimizer_name == "Continuized":
         optimizer, loss_list, loss_list_edges = run_continuized(
             args.n_workers,

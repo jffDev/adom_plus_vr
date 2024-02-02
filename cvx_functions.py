@@ -31,7 +31,7 @@ class logistic_regression(nn.Module):
             - centralized (bool): whether or not to place ourselves
                                   in the centralized setting
         """
-
+        self.name = 'logistic_regression'
         self.mu = mu
         self.centralized = centralized
         self.n_data = n_data
@@ -110,7 +110,7 @@ class linear_regression(nn.Module):
             - centralized (bool): whether or not to place ourselves
                                   in the centralized setting
         """
-
+        self.name = 'linear_regression'
         self.centralized = centralized
         self.n_data = n_data
         if centralized:
