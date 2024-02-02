@@ -504,8 +504,8 @@ class ADOMplusVR_optimizer(Optimizer):
         # self.alpha = self.mu / 2
         # self.nu = self.mu / 2
 
-        self.alpha =  self.mu / 2#1e-2
-        self.nu = 1e-2
+        self.alpha = 1e-2
+        self.nu = 5e-4
 
         self.sigma_2 = np.sqrt(self.mu) / (16 * self.chi * np.sqrt(self.L))
         self.sigma_1 = 1 / ((1 / self.sigma_2) + 0.5)
@@ -540,29 +540,29 @@ class ADOMplusVR_optimizer(Optimizer):
         Z_g = self.sigma_1 * self.Z + (1 - self.sigma_1) * self.Z_f  # ok
 
         # compute the constants in the updates of Y and X
-        coef = (1 + self.eta * self.alpha) / (
-                (1 + self.theta * self.beta) * (1 + self.eta * self.alpha)
-                + self.theta * self.eta
-        )
+        # coef = (1 + self.eta * self.alpha) / (
+        #         (1 + self.theta * self.beta) * (1 + self.eta * self.alpha)
+        #         + self.theta * self.eta
+        # )
 
         ar = [self.X_f, X_update, self.w]
         r = np.random.choice([0, 1, 2], 1, p=[self.p_1, self.p_2, 1 - self.p_1 - self.p_2])
         self.w = ar[r[0]]
 
-        # coef = 1 / (1 + self.theta * self.beta)
+        coef = 1 / (1 + self.theta * self.beta)
         # Update X, Y, Z and M
         Y_new = coef * (
-                # self.Y
-                # + self.theta * self.beta * self.grad_X_g
-                # - self.theta * self.beta * self.eta * X_g
-                # - self.theta * (1 / self.eta * (Y_g + Z_g) + self.X)
+                self.Y
+                + self.theta * self.beta * self.grad_X_g
+                - self.theta * self.beta * self.eta * X_g
+                - self.theta * (1 / self.eta * (Y_g + Z_g) + self.X)
 
 
-                + self.eta * self.theta / (1 + self.eta * self.alpha)
-                - X_g * self.theta * (
-                            self.beta * self.nu + self.eta * (self.nu + self.alpha) / (1 + self.eta * self.alpha))
-                - self.X * self.theta / (1 + self.eta * self.alpha)
-                - (self.theta / self.nu) * (Y_g + Z_g)
+                # + self.eta * self.theta / (1 + self.eta * self.alpha)
+                # - X_g * self.theta * (
+                #             self.beta * self.nu + self.eta * (self.nu + self.alpha) / (1 + self.eta * self.alpha))
+                # - self.X * self.theta / (1 + self.eta * self.alpha)
+                # - (self.theta / self.nu) * (Y_g + Z_g)
         )
         X_new = 1 / (1 + self.eta * self.alpha) * (
                 self.X
@@ -746,7 +746,7 @@ class AccGT_optimizer(Optimizer):
         self.s_previous = grad
         self.grad_previous = grad
 
-        self.alpha = 1e-5
+        self.alpha = 1e-6
         self.theta = np.sqrt(self.mu * self.alpha) / 2
         # self.theta = 1.
 
