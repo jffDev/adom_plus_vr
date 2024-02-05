@@ -437,8 +437,6 @@ class ADOMplusVR_optimizer(Optimizer):
         """
         self.f.zero_grad()
 
-        loss =  torch.sum(self.f(self.data, self.labels))
-
         data = self.data  # shape [n_workers, n_data_per_worker, dim]
         dataw = self.dataw  # shape [n_workers, n_data_per_worker, dim]
         labels = self.labels  # shape [n_workers, n_data_per_worker, 1]
@@ -477,7 +475,7 @@ class ADOMplusVR_optimizer(Optimizer):
 
     def initialize(self, ):
         n = self.data.shape[1]
-        self.b = np.sqrt(n) #np.max([np.sqrt(n), (n * np.sqrt(self.L / self.mu)).detach().numpy()])
+        self.b = np.max([np.sqrt(n), n * np.sqrt(self.mu / self.L)])
         self.batch_size = np.int64(self.b)
         self.compute_grads()
 
@@ -498,33 +496,36 @@ class ADOMplusVR_optimizer(Optimizer):
         b = torch.tensor(self.b)
 
         self.tau_0 = 1 / (2 * b)
-        self.tau_2 = np.min([1 / 2, np.max([1, np.sqrt(n) / b]) * np.sqrt(np.sqrt(self.mu / self.L))])
+        self.tau_2 = np.min([1 / 2, np.max([1, np.sqrt(n) / b]) * np.sqrt(self.mu / self.L)])
         self.tau_1 = (1 - self.tau_0) / (1 / self.tau_2 + 1 / 2)
 
-        # self.alpha = self.mu / 2
-        # self.nu = self.mu / 2
-
-        self.alpha = 1e-2
-        self.nu = 5e-4
+        self.alpha = self.mu / 2
+        self.nu = self.mu / 2
 
         self.sigma_2 = np.sqrt(self.mu) / (16 * self.chi * np.sqrt(self.L))
-        self.sigma_1 = 1 / ((1 / self.sigma_2) + 0.5)
+        self.sigma_1 = 1 / (1 / self.sigma_2 + 1/2)
 
         self.eta = 1 / (self.L * (self.tau_2 + 2 * self.tau_1 / (1 - self.tau_1)))
 
         self.beta = 1 / (2 * self.L)
         self.delta = 1 / (17 * self.L)
 
-        self.gamma = self.nu / (14 * self.sigma_2 * (self.chi ** 2))
+        self.gamma = self.nu / (14 * self.sigma_2 * np.square(self.chi))
 
         self.theta = self.nu / (4 * self.sigma_2)
 
-        self.zeta = self.mu
+        self.zeta = 1/2 #self.mu
 
         self.Lambda = n / b * (1 / 2 + 1 / (b * self.tau_1))
 
         self.p_1 = 1 / (2 * self.Lambda)
         self.p_2 = 1 / (self.Lambda * b * self.tau_1)
+
+        # print("self.b", self.b)
+        # print("Lambda", self.Lambda)
+        # print("self.p_1", self.p_1)
+        # print("self.p_2", self.p_2)
+        # print("p", 1 - self.p_1 - self.p_2)
 
     def step(self, W):
         # compute X_g
@@ -536,49 +537,49 @@ class ADOMplusVR_optimizer(Optimizer):
         X_g, self.grad_X_g = self.get_grads()
 
         # Compute Y_g and Z_g
-        Y_g = self.sigma_1 * self.Y + (1 - self.sigma_1) * self.Y_f  # ok
-        Z_g = self.sigma_1 * self.Z + (1 - self.sigma_1) * self.Z_f  # ok
+        Y_g = self.sigma_1 * self.Y + (1 - self.sigma_1) * self.Y_f
+        Z_g = self.sigma_1 * self.Z + (1 - self.sigma_1) * self.Z_f
 
-        # compute the constants in the updates of Y and X
-        # coef = (1 + self.eta * self.alpha) / (
-        #         (1 + self.theta * self.beta) * (1 + self.eta * self.alpha)
-        #         + self.theta * self.eta
-        # )
-
-        ar = [self.X_f, X_update, self.w]
+        ar = [self.X_f, X_g, self.w]
         r = np.random.choice([0, 1, 2], 1, p=[self.p_1, self.p_2, 1 - self.p_1 - self.p_2])
         self.w = ar[r[0]]
 
-        coef = 1 / (1 + self.theta * self.beta)
-        # Update X, Y, Z and M
-        Y_new = coef * (
-                self.Y
-                + self.theta * self.beta * self.grad_X_g
-                - self.theta * self.beta * self.eta * X_g
-                - self.theta * (1 / self.eta * (Y_g + Z_g) + self.X)
-
-
-                # + self.eta * self.theta / (1 + self.eta * self.alpha)
-                # - X_g * self.theta * (
-                #             self.beta * self.nu + self.eta * (self.nu + self.alpha) / (1 + self.eta * self.alpha))
-                # - self.X * self.theta / (1 + self.eta * self.alpha)
-                # - (self.theta / self.nu) * (Y_g + Z_g)
+        # compute the constants in the updates of Y and X
+        c_1 = (1 + self.eta * self.alpha) / (
+                (1 + self.theta * self.beta) * (1 + self.eta * self.alpha)
+                + self.theta * self.eta
         )
-        X_new = 1 / (1 + self.eta * self.alpha) * (
+
+        Y_new = c_1 * (
+                self.Y
+                + self.grad_X_g * (
+                        self.theta * self.beta + self.eta * (self.theta / (1 + self.eta * self.alpha))
+                )
+                - X_g * self.theta * (
+                        self.beta * self.nu
+                        + self.eta * (self.nu + self.alpha) / (1 + self.eta * self.alpha)
+                )
+                - self.X * self.theta / (1 + self.eta * self.alpha)
+                - (self.theta / self.nu) * (Y_g + Z_g)
+        )
+
+        X_new = (
                 self.X
                 + self.eta * self.alpha * X_g
                 - self.eta * (self.grad_X_g - self.nu * X_g - Y_new)
-        )
+        ) / (1 + self.eta * self.alpha)
+
         Z_new = (
                 self.Z
                 + self.gamma * self.delta * (Z_g - self.Z)
                 - (torch.eye(W.shape[0]) - W)
                 @ ((self.gamma / self.nu) * (Y_g + Z_g) + self.M)  # ok
         )
+
         M_new = (
                 self.gamma / self.nu * (Y_g + Z_g) + self.M
                 - (torch.eye(W.shape[0]) - W) @ ((self.gamma / self.nu) * (Y_g + Z_g) + self.M)
-        )  # ok
+        )
         # Compute X_f, Y_f, Z_f
         self.X_f = X_g + self.tau_2 * (X_new - self.X)
         self.Y_f = Y_g + self.sigma_2 * (Y_new - self.Y)
@@ -728,7 +729,6 @@ class AccGT_optimizer(Optimizer):
 
 
     def compute_grads(self,):
-
         self.f.zero_grad()
         loss = torch.sum(self.f(self.data, self.labels))
         loss.backward()
@@ -746,7 +746,7 @@ class AccGT_optimizer(Optimizer):
         self.s_previous = grad
         self.grad_previous = grad
 
-        self.alpha = 1e-6
+        self.alpha = 1e-3
         self.theta = np.sqrt(self.mu * self.alpha) / 2
         # self.theta = 1.
 

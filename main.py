@@ -15,7 +15,6 @@ import importlib
 importlib.reload(run_optimizers)
 from run_optimizers import run_optimizer
 from data import create_data, create_K_graphs
-import statsmodels.api as sm
 
 
 def get_args_parser():
