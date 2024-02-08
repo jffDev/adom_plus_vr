@@ -372,9 +372,10 @@ def run_ADOMplusVR(
         # compute distance to optimal params
         with torch.no_grad():
             loss = compute_average_distance_to_opt(optimizer.X, x_star)
-            loss_list = (
-                loss_list + [loss] * n_workers
-            )  # we take n gradients at each round
+            if optimizer.r != 2:
+                loss_list = (
+                    loss_list + [loss] * n_workers
+                )  # we take n gradients at each round
             loss_list_edges = (
                 loss_list_edges + [loss] * n_edges
             )  # n_edges counted the total number of edges activated

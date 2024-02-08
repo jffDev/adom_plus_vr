@@ -447,30 +447,28 @@ class ADOMplusVR_optimizer(Optimizer):
         dataw = dataw[:, idx, :]  # shape [n_workers, batch_size_data_per_worker, dim]
         labels = labels[:, idx, :]  # shape [n_workers, batch_size_data_per_worker, 1]
 
-        # n = self.data.shape[0]
-        # L_i = []
-        # if self.f.name == 'linear_regression':
-        #     for i in range(n):
-        #        eigs = torch.linalg.eigh(data[i].T @ data[i])
-        #        L_i.append(eigs[0][-1])
-        #     L_i = torch.tensor(L_i)
-        #     p = max(L_i) / torch.mean(L_i)
-        # else:
-        #     for i in range(n):
-        #         L_i.append(torch.mean(torch.sum(data[i] ** 2, dim=1), dim=0) / 4)
-        #     L_i = torch.tensor(L_i)
-        #     p = max(L_i) / torch.mean(L_i)
-        # #
-        # loss = (torch.sum(1/(p*n)*(self.f(data, labels) - self.f(dataw, labels)))) / self.batch_size + torch.sum(self.f(self.dataw, self.labels))
-        loss = (torch.sum((self.f(data, labels) - self.f(dataw, labels)))) / self.batch_size + torch.sum(self.f(self.dataw, self.labels))
+        loss = (torch.sum(self.f(data, labels)) - torch.sum(self.f(dataw, labels))) / self.batch_size
         loss.backward()
 
-    def update_params_f(self, X, w):
+    def compute_grads_w(self,):
+        self.f.zero_grad()
+        loss = torch.sum(self.f(self.dataw, self.labels))
+        loss.backward()
+
+    def get_grad_w(self, ):
+        for xi in self.f.parameters():
+            w = xi.data.squeeze()
+            grad_w = xi.grad.data.squeeze()
+        return w, grad_w
+
+    def update_params_f_x(self, X):
         """
         Replace the previous parameters with X_update.
         """
         for xi in self.f.parameters():
             xi.data = X.detach().clone().unsqueeze(-1)
+    def update_params_f_w(self, w):
+        for xi in self.f.parameters():
             xi.dataw = w.detach().clone().unsqueeze(-1)
 
     def initialize(self, ):
@@ -481,7 +479,7 @@ class ADOMplusVR_optimizer(Optimizer):
 
         X, grad_X = self.get_grads()
         self.X = X
-        self.grad_X_g = grad_X
+        self.grad_batch = grad_X
 
         self.M = torch.randn(X.shape).double()
         self.Y = torch.randn(X.shape).double()
@@ -521,28 +519,33 @@ class ADOMplusVR_optimizer(Optimizer):
         self.p_1 = 1 / (2 * self.Lambda)
         self.p_2 = 1 / (self.Lambda * b * self.tau_1)
 
-        # print("self.b", self.b)
-        # print("Lambda", self.Lambda)
-        # print("self.p_1", self.p_1)
-        # print("self.p_2", self.p_2)
-        # print("p", 1 - self.p_1 - self.p_2)
+        self.update_params_f_w(self.w)
+        self.compute_grads_w()
+        self.w, self.grad_w = self.get_grad_w()
+        self.r = -1
 
     def step(self, W):
         # compute X_g
         X_update = self.tau_1 * self.X + self.tau_0 * self.w + (1 - self.tau_1 - self.tau_0) * self.X_f
-        self.update_params_f(X_update, self.w)
+        self.update_params_f_x(X_update)
 
         # compute and get the gradients at X_g
         self.compute_grads()
-        X_g, self.grad_X_g = self.get_grads()
+        X_g, self.grad_batch = self.get_grads()
+        self.grad_batch += self.grad_w
 
         # Compute Y_g and Z_g
         Y_g = self.sigma_1 * self.Y + (1 - self.sigma_1) * self.Y_f
         Z_g = self.sigma_1 * self.Z + (1 - self.sigma_1) * self.Z_f
 
         ar = [self.X_f, X_g, self.w]
-        r = np.random.choice([0, 1, 2], 1, p=[self.p_1, self.p_2, 1 - self.p_1 - self.p_2])
-        self.w = ar[r[0]]
+        self.r = np.random.choice([0, 1, 2], 1, p=[self.p_1, self.p_2, 1 - self.p_1 - self.p_2])[0]
+        self.w = ar[self.r]
+
+        if self.r != 2:
+            self.update_params_f_w(self.w)
+            self.compute_grads_w()
+            self.w, self.grad_w = self.get_grad_w()
 
         # compute the constants in the updates of Y and X
         c_1 = (1 + self.eta * self.alpha) / (
@@ -552,7 +555,7 @@ class ADOMplusVR_optimizer(Optimizer):
 
         Y_new = c_1 * (
                 self.Y
-                + self.grad_X_g * (
+                + self.grad_batch * (
                         self.theta * self.beta + self.eta * (self.theta / (1 + self.eta * self.alpha))
                 )
                 - X_g * self.theta * (
@@ -564,10 +567,10 @@ class ADOMplusVR_optimizer(Optimizer):
         )
 
         X_new = (
-                self.X
-                + self.eta * self.alpha * X_g
-                - self.eta * (self.grad_X_g - self.nu * X_g - Y_new)
-        ) / (1 + self.eta * self.alpha)
+                        self.X
+                        + self.eta * self.alpha * X_g
+                        - self.eta * (self.grad_batch - self.nu * X_g - Y_new)
+                ) / (1 + self.eta * self.alpha)
 
         Z_new = (
                 self.Z
@@ -589,7 +592,7 @@ class ADOMplusVR_optimizer(Optimizer):
         self.X = X_new
         self.Z = Z_new
         self.M = M_new
-        self.update_params_f(self.X, self.w)
+        self.update_params_f(self.X)
 
 class BEERplusVR_optimizer(Optimizer):
     """
