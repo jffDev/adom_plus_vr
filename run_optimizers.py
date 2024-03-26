@@ -15,8 +15,10 @@ from optimizers import (
     DADAO_optimizer,
     ADOMplus_optimizer,
     ADOMplusVR_optimizer,
-    BEERplusVR_optimizer,
+    GTPAGE_optimizer,
+    GT_SARAH_optimizer,
     AccGT_optimizer,
+    AccVRExtra_optimizer,
     Continuized_optimizer,
     MSDA_optimizer,
 )
@@ -253,6 +255,9 @@ def run_ADOMplus(
             G = list_G[k_mixing % len(list_G)]
             n_edges += len(G.edges)
             k_mixing += 1
+
+        if k == 0:
+            loss_list, loss_list_edges = loss_x_start(optimizer.X, x_star, loss_list, loss_list_edges, n_workers, n_edges)
         # take a gradient step
         optimizer.step(W_final)
         # compute distance to optimal params
@@ -367,6 +372,9 @@ def run_ADOMplusVR(
             G = list_G[k_mixing % len(list_G)]
             n_edges += len(G.edges)
             k_mixing += 1
+
+        if k == 0:
+            loss_list, loss_list_edges = loss_x_start(optimizer.X, x_star, loss_list, loss_list_edges, n_workers, n_edges)
         # take a gradient step
         optimizer.step(W_final)
         # compute distance to optimal params
@@ -376,9 +384,9 @@ def run_ADOMplusVR(
                 loss_list = (
                     loss_list + [loss] * n_workers
                 )  # we take n gradients at each round
-            loss_list_edges = (
-                loss_list_edges + [loss] * n_edges
-            )  # n_edges counted the total number of edges activated
+                loss_list_edges = (
+                    loss_list_edges + [loss] * n_edges
+                )  # n_edges counted the total number of edges activated
         # regularly save the data from the runs
         # if k % 10000 == 0:
         #     save_data(
@@ -404,7 +412,7 @@ def run_ADOMplusVR(
 
     return optimizer, loss_list, loss_list_edges
 
-def run_BEERplusVR(
+def run_GTPAGE(
         n_workers,
         n_steps,
         chi,
@@ -420,7 +428,67 @@ def run_BEERplusVR(
         time_now,
         graph_type,
 ):
-    optimizer = BEERplusVR_optimizer(f, data, labels, dataw=data,  mu=mu, L=L, chi=chi)
+    optimizer = GTPAGE_optimizer(f, data, labels, dataw=data,  mu=mu, L=L, chi=chi)
+    # Initialization of the optimization procedure
+    k_mixing = 0
+    In = torch.eye(n_workers).double()
+    loss_list = []
+    loss_list_edges = []
+    if use_multi_consensus:
+        n_matrix = int(np.ceil(chi * np.log(2)))
+        # if we use multi-consensus, it amounts to changing the
+        # effective chi of the communication matrices used.
+        # Equation 20 of ( https://openreview.net/forum?id=L8-54wkift )
+        # shows that the target value of chi used is 2 for M.C.
+        # We thus change the value of chi in the optimizer,
+        # only if n_matrix > 1
+        if n_matrix > 1:
+            optimizer.chi = 2
+            optimizer.initialize()
+    else:
+        n_matrix = 1
+    # Run BEER+VR
+    for k in trange(n_steps):
+        # compute the multi-consensus matrix
+        W_final = torch.eye(n_workers).double()
+        n_edges = 0
+        for q in range(n_matrix):
+            # apply the procedure described in eq. 18 of the paper.
+            W_final = W_final @ (In - list_W[k_mixing % len(list_W)])
+            G = list_G[k_mixing % len(list_G)]
+            n_edges += len(G.edges)
+            k_mixing += 1
+        # take a gradient step
+        optimizer.step(W_final)
+        # compute distance to optimal params
+        with torch.no_grad():
+            loss = compute_average_distance_to_opt(optimizer.X, x_star)
+
+            loss_list = (
+                    loss_list + [loss] * n_workers
+            )  # we take n gradients at each round
+            loss_list_edges = (
+                    loss_list_edges + [loss] * n_edges
+            )  # n_edges counted the total number of edges activated
+    return optimizer, loss_list, loss_list_edges
+
+def run_GT_SARAH(
+        n_workers,
+        n_steps,
+        chi,
+        f,
+        mu,
+        L,
+        data,
+        labels,
+        x_star,
+        list_G,
+        list_W,
+        use_multi_consensus,
+        time_now,
+        graph_type,
+):
+    optimizer = GT_SARAH_optimizer(f, data, labels, dataw=data,  mu=mu, L=L, chi=chi)
     # Initialization of the optimization procedure
     k_mixing = 0
     In = torch.eye(n_workers).double()
@@ -509,6 +577,9 @@ def run_AccGT(
             G = list_G[k_mixing % len(list_G)]
             n_edges += len(G.edges)
             k_mixing += 1
+
+        if k == 0:
+            loss_list, loss_list_edges = loss_x_start(optimizer.X, x_star, loss_list, loss_list_edges, n_workers, n_edges)
         # take a gradient step
         optimizer.step(W_final)
         # compute distance to optimal params
@@ -521,6 +592,79 @@ def run_AccGT(
                     loss_list_edges + [loss] * n_edges
             )  # n_edges counted the total number of edges activated
     return optimizer, loss_list, loss_list_edges
+
+def run_AccVRExtra(
+        n_workers,
+        n_steps,
+        chi,
+        f,
+        mu,
+        L,
+        data,
+        labels,
+        x_star,
+        list_G,
+        list_W,
+        use_multi_consensus,
+        time_now,
+        graph_type,
+):
+    optimizer = AccVRExtra_optimizer(f, data, labels, dataw=data,  mu=mu, L=L, chi=chi)
+    # Initialization of the optimization procedure
+    k_mixing = 0
+    In = torch.eye(n_workers).double()
+    loss_list = []
+    loss_list_edges = []
+    if use_multi_consensus:
+        n_matrix = int(np.ceil(chi * np.log(2)))
+        # if we use multi-consensus, it amounts to changing the
+        # effective chi of the communication matrices used.
+        # Equation 20 of ( https://openreview.net/forum?id=L8-54wkift )
+        # shows that the target value of chi used is 2 for M.C.
+        # We thus change the value of chi in the optimizer,
+        # only if n_matrix > 1
+        if n_matrix > 1:
+            optimizer.chi = 2
+            optimizer.initialize()
+    else:
+        n_matrix = 1
+    # Run Acc-GT
+    for k in trange(n_steps):
+        # compute the multi-consensus matrix
+        W_final = torch.eye(n_workers).double()
+        n_edges = 0
+        for q in range(n_matrix):
+            # apply the procedure described in eq. 18 of the paper.
+            W_final = W_final @ (In - list_W[k_mixing % len(list_W)])
+            G = list_G[k_mixing % len(list_G)]
+            n_edges += len(G.edges)
+            k_mixing += 1
+
+        if k == 0:
+            loss_list, loss_list_edges = loss_x_start(optimizer.X, x_star, loss_list, loss_list_edges, n_workers, n_edges)
+        # take a gradient step
+        optimizer.step(W_final)
+        # compute distance to optimal params
+        with torch.no_grad():
+            loss = compute_average_distance_to_opt(optimizer.X, x_star)
+            if optimizer.r == 0:
+                loss_list = (
+                        loss_list + [loss] * n_workers
+                )  # we take n gradients at each round
+                loss_list_edges = (
+                        loss_list_edges + [loss] * n_edges
+                )  # n_edges counted the total number of edges activated
+    return optimizer, loss_list, loss_list_edges
+
+def loss_x_start(x, x_star, loss_list, loss_list_edges, n_workers, n_edges):
+    loss = compute_average_distance_to_opt(x, x_star)
+    loss_list = (
+            loss_list + [loss] * n_workers
+    )  # we take n gradients at each round
+    loss_list_edges = (
+            loss_list_edges + [loss] * n_edges
+    )  # n_edges counted the total number of edges activated
+    return loss_list, loss_list_edges
 
 def run_continuized(
     n_workers,
@@ -784,8 +928,25 @@ def run_optimizer(args, f, x_star, time_now):
             time_now,
             args.graph_type,
         )
-    elif args.optimizer_name == "BEERplusVR":
-        optimizer, loss_list, loss_list_edges = run_BEERplusVR(
+    elif args.optimizer_name == "GTPAGE":
+        optimizer, loss_list, loss_list_edges = run_GTPAGE(
+            args.n_workers,
+            int(args.steps),
+            args.chi,
+            f,
+            args.mu,
+            args.L,
+            args.data,
+            args.labels,
+            x_star,
+            args.list_G,
+            args.list_W,
+            args.use_multi_consensus,
+            time_now,
+            args.graph_type,
+        )
+    elif args.optimizer_name == "GT_SARAH":
+        optimizer, loss_list, loss_list_edges = run_GT_SARAH(
             args.n_workers,
             int(args.steps),
             args.chi,
@@ -803,6 +964,23 @@ def run_optimizer(args, f, x_star, time_now):
         )
     elif args.optimizer_name == "AccGT":
         optimizer, loss_list, loss_list_edges = run_AccGT(
+            args.n_workers,
+            int(args.steps),
+            args.chi,
+            f,
+            args.mu,
+            args.L,
+            args.data,
+            args.labels,
+            x_star,
+            args.list_G,
+            args.list_W,
+            args.use_multi_consensus,
+            time_now,
+            args.graph_type,
+        )
+    elif args.optimizer_name == "AccVRExtra":
+        optimizer, loss_list, loss_list_edges = run_AccVRExtra(
             args.n_workers,
             int(args.steps),
             args.chi,

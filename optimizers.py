@@ -322,6 +322,7 @@ class ADOMplus_optimizer(Optimizer):
         self.X = X
         self.grad_X_g = grad_X
 
+        self.X = torch.ones(X.shape).double()
         self.M = torch.randn(X.shape).double()
         self.Y = torch.randn(X.shape).double()
         self.Z = torch.zeros(X.shape).double()
@@ -427,8 +428,7 @@ class ADOMplusVR_optimizer(Optimizer):
         self.asynchronous = False
         self.initialize()
 
-
-    def compute_grads(self,):
+    def compute_grads(self, ):
         """
         Compute the grads $\partial f_i / \partial x_i$
         by performing a forward and backward pass with the loss
@@ -450,7 +450,7 @@ class ADOMplusVR_optimizer(Optimizer):
         loss = (torch.sum(self.f(data, labels)) - torch.sum(self.f(dataw, labels))) / self.batch_size
         loss.backward()
 
-    def compute_grads_w(self,):
+    def compute_grads_w(self, ):
         self.f.zero_grad()
         loss = torch.sum(self.f(self.dataw, self.labels))
         loss.backward()
@@ -467,6 +467,7 @@ class ADOMplusVR_optimizer(Optimizer):
         """
         for xi in self.f.parameters():
             xi.data = X.detach().clone().unsqueeze(-1)
+
     def update_params_f_w(self, w):
         for xi in self.f.parameters():
             xi.dataw = w.detach().clone().unsqueeze(-1)
@@ -481,6 +482,7 @@ class ADOMplusVR_optimizer(Optimizer):
         self.X = X
         self.grad_batch = grad_X
 
+        self.X = torch.ones(X.shape).double()
         self.M = torch.randn(X.shape).double()
         self.Y = torch.randn(X.shape).double()
         self.Z = torch.zeros(X.shape).double()
@@ -501,7 +503,7 @@ class ADOMplusVR_optimizer(Optimizer):
         self.nu = self.mu / 2
 
         self.sigma_2 = np.sqrt(self.mu) / (16 * self.chi * np.sqrt(self.L))
-        self.sigma_1 = 1 / (1 / self.sigma_2 + 1/2)
+        self.sigma_1 = 1 / (1 / self.sigma_2 + 1 / 2)
 
         self.eta = 1 / (self.L * (self.tau_2 + 2 * self.tau_1 / (1 - self.tau_1)))
 
@@ -512,11 +514,11 @@ class ADOMplusVR_optimizer(Optimizer):
 
         self.theta = self.nu / (4 * self.sigma_2)
 
-        self.zeta = 1/2 #self.mu
+        self.zeta = 1 / 2  # self.mu
 
         self.Lambda = n / b * (1 / 2 + 1 / (b * self.tau_1))
 
-        self.p_1 = 1 / (2 * self.Lambda)
+        self.p_1 = 1 / (4 * self.Lambda)
         self.p_2 = 1 / (self.Lambda * b * self.tau_1)
 
         self.update_params_f_w(self.w)
@@ -594,10 +596,12 @@ class ADOMplusVR_optimizer(Optimizer):
         self.M = M_new
         self.update_params_f(self.X)
 
-class BEERplusVR_optimizer(Optimizer):
+
+class GTPAGE_optimizer(Optimizer):
     """
     Implementation of the BEER+VR optimizer
     """
+
     def __init__(self, f, data, labels, dataw, mu=1, L=1, chi=1, batch_size=10, ):
         super().__init__(f, data, labels)
         """"
@@ -613,19 +617,31 @@ class BEERplusVR_optimizer(Optimizer):
                            of the graph's Laplacians, see page 4 of the paper.
         """
         self.dataw = dataw
-        self.batch_size = batch_size
         self.L = L
+        self.n = self.data.shape[0]
+        self.batch_size = np.int64(np.sqrt(self.n) * self.L)
         self.mu = mu
         self.chi = chi
         self.asynchronous = False
         self.f = f
 
         self.eta = 0.1
-        self.batch_size = batch_size
         self.initialize()
 
+    def initialize(self, ):
+        self.I_n = torch.eye(self.n)
+        self.eta = 1e-2
 
-    def compute_grads(self,):
+        self.compute_grads()
+        X, grad_X = self.get_grads()
+        self.X = X
+        self.Y = grad_X
+
+        self.V = self.Y / self.n
+        self.p = self.batch_size / (self.batch_size + self.n)
+        self.grad_previous = grad_X
+
+    def compute_grads(self, ):
 
         self.f.zero_grad()
 
@@ -666,33 +682,30 @@ class BEERplusVR_optimizer(Optimizer):
             grad_X = xi.grad.data.squeeze()
         return X, grad_X
 
-    def initialize(self, ):
-
-        self.n = self.data.shape[0]
-        self.I_n = torch.eye(self.n)
-        self.eta = 1e-7
-
-        self.compute_grads()
-        X, grad_X = self.get_grads()
-        self.X = X
-        self.Y = grad_X
-
-        self.V = self.Y / self.n
-        self.p = 1 / np.sqrt(self.n)
-        self.grad_previous = grad_X
+    def compute_full_grads(self, ):
+        self.f.zero_grad()
+        data = self.data  # shape [n_workers, n_data_per_worker, dim]
+        labels = self.labels  # shape [n_workers, n_data_per_worker, 1]
+        loss = torch.sum(self.f(data, labels))
+        loss.backward()
 
     def step(self, W):
+
         X_new = (torch.eye(W.shape[0]) - W) @ self.X - self.eta * self.V
 
         self.update_params_f(X_new)
-        self.compute_grads()
-        X, grad = self.get_grads()
 
-        delta = self.Y + grad - self.grad_previous
-
-        ar = [grad, delta]
         r = np.random.choice([0, 1], 1, p=[self.p, 1 - self.p])
-        Y_new = ar[r[0]]
+
+        if r[0] == 0:
+            self.compute_full_grads()
+            _, grad = self.get_grads()
+            Y_new = grad
+        else:
+            self.compute_grads()
+            _, grad = self.get_grads()
+            Y_new = self.Y + grad - self.grad_previous
+
         V_new = (torch.eye(W.shape[0]) - W) @ self.V + Y_new - self.Y
 
         self.grad_previous = grad
@@ -700,10 +713,127 @@ class BEERplusVR_optimizer(Optimizer):
         self.V = V_new
         self.X = X_new
 
+
+class GT_SARAH_optimizer(Optimizer):
+    """
+    Implementation of the BEER+VR optimizer
+    """
+
+    def __init__(self, f, data, labels, dataw, mu=1, L=1, chi=1, batch_size=10, ):
+        super().__init__(f, data, labels)
+        """"
+        Parameters:
+            - f (nn.Module): the convex function to optimize.
+            - data (torch.tensor): of shape [n_workers, n_data_per_worker, dim]
+                                   the data points at each worker.
+            - labels (torch.tensor): of shape [n_workers, n_data_per_worker, 1]
+                                     the labels of each data point.
+            - mu (float): the strong convexity coefficient.
+            - L (float): the smoothness coefficient.
+            - chi (float): for the matrices considers, equals \frac{\lambda_max}{\lambda_min^+}
+                           of the graph's Laplacians, see page 4 of the paper.
+        """
+        self.dataw = dataw
+        self.batch_size = batch_size
+        self.L = L
+        self.mu = mu
+        self.chi = chi
+        self.asynchronous = False
+        self.f = f
+
+        self.eta = 0.1
+        self.n_inner_iters = 10
+
+        # print(self.data.shape)
+        # print("self.X.shape", self.X.shape)
+        self.v = torch.zeros((self.data.shape[0], self.data.shape[2])).double()
+        self.y = torch.zeros((self.data.shape[0], self.data.shape[2])).double()
+        self.X = torch.randn(self.data.shape[0], self.data.shape[2]).double()
+
+    def compute_grads(self, ):
+
+        self.f.zero_grad()
+
+        data = self.data  # shape [n_workers, n_data_per_worker, dim]
+        labels = self.labels  # shape [n_workers, n_data_per_worker, 1]
+
+        idx = np.random.randint(0, self.data.shape[1], self.batch_size)
+
+        data = data[:, idx, :]  # shape [n_workers, batch_size_data_per_worker, dim]
+        labels = labels[:, idx, :]  # shape [n_workers, batch_size_data_per_worker, 1]
+
+        loss = torch.sum(self.f(data, labels)) / self.batch_size
+        loss.backward()
+
+    def compute_full_grads(self, ):
+        self.f.zero_grad()
+        data = self.data  # shape [n_workers, n_data_per_worker, dim]
+        labels = self.labels  # shape [n_workers, n_data_per_worker, 1]
+        loss = torch.sum(self.f(data, labels))
+        loss.backward()
+
+    def update_params_f(self, X):
+        """
+        Replace the previous parameters with X_update.
+        """
+        for xi in self.f.parameters():
+            xi.data = X.detach().clone().unsqueeze(-1)
+
+    def get_grads(self, ):
+        """
+        Returns the gradients and current parameters of f_i
+
+        Returns:
+            - X (torch.tensor): of shape [n_workers, dim, 1],
+                                the current parameters of each f_i.
+            - grad_X (torch.tensor): of shape [n_workers, dim, 1]
+                                     the gradients \partial f_i / \partial x_i.
+        """
+
+        # loop of length 1: there is only 1 set of parameters in matrix form,
+        # see the definition of the functions in cvx_functions.py
+        for xi in self.f.parameters():
+            X = xi.data.squeeze()
+            # in the asynchronous case, grads are 0 everywhere exept at the index i
+            grad_X = xi.grad.data.squeeze()
+        return X, grad_X
+
+    def step(self, W):
+
+        self.v_last = self.v
+        self.x_last = self.X
+
+        self.compute_full_grads()
+        _, grad_X = self.get_grads()
+        self.grad_X = grad_X
+
+        self.v = self.grad_X
+        self.y = W @ self.y + self.v - self.v_last
+        self.X = W @ self.X - self.eta * self.y
+
+        for inner_iter in range(self.n_inner_iters):
+            self.update_params_f(self.X)
+            self.compute_grads()
+            _, grad_x = self.get_grads()
+
+            self.update_params_f(self.x_last)
+            self.compute_grads()
+            _, grad_x_last = self.get_grads()
+
+            self.v_last = self.v
+            self.x_last = self.X
+
+            self.v = self.v + grad_x - grad_x_last
+
+            self.y = W @ self.y + self.v - self.v_last
+            self.X = W @ self.X - self.eta * self.y
+
+
 class AccGT_optimizer(Optimizer):
     """
     Implementation of the AccGT optimizer
     """
+
     def __init__(self, f, data, labels, dataw, mu=1, L=1, chi=1, batch_size=10, ):
         super().__init__(f, data, labels)
         """"
@@ -730,8 +860,7 @@ class AccGT_optimizer(Optimizer):
         self.batch_size = batch_size
         self.initialize()
 
-
-    def compute_grads(self,):
+    def compute_grads(self, ):
         self.f.zero_grad()
         loss = torch.sum(self.f(self.data, self.labels))
         loss.backward()
@@ -743,7 +872,8 @@ class AccGT_optimizer(Optimizer):
         self.compute_grads()
         X, grad = self.get_grads()
 
-        self.X = X
+        # self.X = X
+        self.X = torch.ones(X.shape).double()
         self.Y = X
         self.Z = X
         self.s_previous = grad
@@ -754,7 +884,6 @@ class AccGT_optimizer(Optimizer):
         # self.theta = 1.
 
     def step(self, W):
-
         self.Y = self.theta * self.Z + (1 - self.theta) * self.X
 
         self.update_params_f(self.Y)
@@ -771,6 +900,292 @@ class AccGT_optimizer(Optimizer):
 
         self.grad_previous = grad
         self.s_previous = s
+
+
+class AccVRExtra_optimizer(Optimizer):
+    """
+    Implementation of the Acc_VR_Extra optimizer
+    """
+
+    def __init__(self, f, data, labels, dataw, mu=1, L=1, chi=1, batch_size=10, ):
+        super().__init__(f, data, labels)
+        """"
+        Parameters:
+            - f (nn.Module): the convex function to optimize.
+            - data (torch.tensor): of shape [n_workers, n_data_per_worker, dim]
+                                   the data points at each worker.
+            - labels (torch.tensor): of shape [n_workers, n_data_per_worker, 1]
+                                     the labels of each data point.
+            - mu (float): the strong convexity coefficient.
+            - L (float): the smoothness coefficient.
+            - chi (float): for the matrices considers, equals \frac{\lambda_max}{\lambda_min^+}
+                           of the graph's Laplacians, see page 4 of the paper.
+        """
+        self.dataw = dataw
+        self.batch_size = batch_size
+        self.L = L
+        self.mu = mu
+        self.chi = chi
+        self.asynchronous = False
+        self.f = f
+
+        self.initialize()
+
+    def initialize(self, ):
+        self.n = self.data.shape[0]
+        self.X = torch.ones(self.data.shape[0], self.data.shape[2]).double()
+
+        self.Z = self.X
+        self.w = self.X
+        self.lam = torch.zeros(self.X.shape).double()
+
+        self.alpha = 5e-3
+        self.batch_size = np.int64(np.sqrt(self.n))
+
+        self.zeta_1 = 0.5
+        self.zeta_2 = self.L / (2 * self.batch_size)
+
+        self.p = self.batch_size / self.n
+
+        self.update_params_f_w(self.w)
+        self.compute_grads_w()
+        self.W, self.grad_w = self.get_grad_w()
+
+    def compute_grads(self, ):
+        """
+        Compute the grads $\partial f_i / \partial x_i$
+        by performing a forward and backward pass with the loss
+        $f = \sum_i f_i$ in the syncrhonous regime, or with the loss
+        $f = f_i$ in the asynchronous one.
+        """
+        self.f.zero_grad()
+
+        data = self.data  # shape [n_workers, n_data_per_worker, dim]
+        dataw = self.dataw  # shape [n_workers, n_data_per_worker, dim]
+        labels = self.labels  # shape [n_workers, n_data_per_worker, 1]
+
+        idx = np.random.randint(0, self.data.shape[1], self.batch_size)
+
+        data = data[:, idx, :]  # shape [n_workers, batch_size_data_per_worker, dim]
+        dataw = dataw[:, idx, :]  # shape [n_workers, batch_size_data_per_worker, dim]
+        labels = labels[:, idx, :]  # shape [n_workers, batch_size_data_per_worker, 1]
+
+        loss = (torch.sum(self.f(data, labels)) - torch.sum(self.f(dataw, labels))) / self.batch_size
+        loss.backward()
+
+    def compute_grads_w(self, ):
+        self.f.zero_grad()
+        loss = torch.sum(self.f(self.dataw, self.labels))
+        loss.backward()
+
+    def get_grad_w(self, ):
+        for xi in self.f.parameters():
+            w = xi.data.squeeze()
+            grad_w = xi.grad.data.squeeze()
+        return w, grad_w
+
+    def update_params_f(self, X):
+        for xi in self.f.parameters():
+            xi.data = X.detach().clone().unsqueeze(-1)
+
+    def update_params_f_w(self, w):
+        for xi in self.f.parameters():
+            xi.dataw = w.detach().clone().unsqueeze(-1)
+
+    def step(self, W):
+
+        self.U = (torch.eye(W.shape[0]) - W)/2 #torch.sqrt(W / 2)
+        Y_new = self.zeta_1 * self.Z + self.zeta_2 * self.w + (1 - self.zeta_1 - self.zeta_2) * self.X
+
+        self.update_params_f(Y_new)
+        self.compute_grads()
+
+        _, self.grad_batch = self.get_grads()
+        self.grad_batch += self.grad_w
+
+        Z_new = 1 / (1 + self.mu * self.alpha / self.zeta_1) * \
+                (
+                        self.mu * self.alpha * Y_new / self.zeta_1 +
+                        self.Z -
+                        (1/self.zeta_1) *
+                        (
+                                self.alpha * self.grad_batch +
+                                self.U @ self.lam +
+                                self.zeta_1 * ((torch.eye(W.shape[0]) - W@W)/2) @ self.Z
+                        )
+                )
+
+        self.lam = self.lam + self.zeta_1 * (self.U @ Z_new)
+
+        X_new = Y_new + self.zeta_1 * (Z_new - self.Z)
+
+        ar = [self.X, self.w]
+        self.r = np.random.choice([0, 1], 1, p=[self.p, 1 - self.p])[0]
+        self.w = ar[self.r]
+
+        if self.r == 0:
+            self.update_params_f_w(self.w)
+            self.compute_grads_w()
+            self.w, self.grad_w = self.get_grad_w()
+
+        self.Z = Z_new
+        self.X = X_new
+
+
+class Destress_optimizer(Optimizer):
+    """
+    Implementation of the Destress optimizer
+    """
+
+    def __init__(self, f, data, labels, dataw, mu=1, L=1, chi=1, batch_size=10, ):
+        super().__init__(f, data, labels)
+        """"
+        Parameters:
+            - f (nn.Module): the convex function to optimize.
+            - data (torch.tensor): of shape [n_workers, n_data_per_worker, dim]
+                                   the data points at each worker.
+            - labels (torch.tensor): of shape [n_workers, n_data_per_worker, 1]
+                                     the labels of each data point.
+            - mu (float): the strong convexity coefficient.
+            - L (float): the smoothness coefficient.
+            - chi (float): for the matrices considers, equals \frac{\lambda_max}{\lambda_min^+}
+                           of the graph's Laplacians, see page 4 of the paper.
+        """
+        self.dataw = dataw
+        self.batch_size = batch_size
+        self.L = L
+        self.mu = mu
+        self.chi = chi
+        self.asynchronous = False
+        self.f = f
+
+        self.initialize()
+
+    def T(x, k):
+        if k == 0:
+            if type(x) is np.ndarray:
+                return np.eye(x.shape[0])
+            else:
+                return 1
+
+        if type(x) is np.ndarray:
+            prev = np.eye(x.shape[0])
+        else:
+            prev = 1
+
+        current = x
+        for _ in range(k - 1):
+            current, prev = 2 * np.dot(x, current) - prev, current
+
+        return current
+
+    def initialize(self, ):
+        self.n = self.data.shape[0]
+        self.X = torch.randn(self.data.shape[0], self.data.shape[2]).double()
+        self.Y = torch.zeros(self.X.shape).double()
+
+        K_in=1
+        K_out=1
+        opt=0
+        n_inner_iters=100
+        eta=0.1
+        batch_size=1
+
+        self.K_in = K_in
+        self.K_out = K_out
+
+        self.eta = eta
+        self.opt = opt
+        self.n_inner_iters = n_inner_iters
+        self.batch_size = batch_size
+
+        average_matrix = np.ones((self.p.n_agent, self.p.n_agent)) / self.p.n_agent
+        alpha = np.linalg.norm(self.W - average_matrix, 2)
+        self.W_in = self.T(self.W / alpha, self.K_in) / self.T(1 / alpha, self.K_in)
+        self.W_out = self.T(self.W / alpha, self.K_out) / self.T(1 / alpha, self.K_out)
+
+        if len(self.x_0.shape) == 2:
+            self.x = np.tile(self.x_0.mean(axis=1), (self.p.n_agent, 1)).T
+        else:
+            self.x = self.x_0.copy()
+
+        self.grad_last = self.grad(self.x)
+        self.s = self.grad_last.copy()
+        self.s = np.tile(self.s.mean(axis=1), (self.p.n_agent, 1)).T
+
+    def compute_grads(self, ):
+        """
+        Compute the grads $\partial f_i / \partial x_i$
+        by performing a forward and backward pass with the loss
+        $f = \sum_i f_i$ in the syncrhonous regime, or with the loss
+        $f = f_i$ in the asynchronous one.
+        """
+        self.f.zero_grad()
+
+        data = self.data  # shape [n_workers, n_data_per_worker, dim]
+        dataw = self.dataw  # shape [n_workers, n_data_per_worker, dim]
+        labels = self.labels  # shape [n_workers, n_data_per_worker, 1]
+
+        idx = np.random.randint(0, self.data.shape[1], self.batch_size)
+
+        data = data[:, idx, :]  # shape [n_workers, batch_size_data_per_worker, dim]
+        dataw = dataw[:, idx, :]  # shape [n_workers, batch_size_data_per_worker, dim]
+        labels = labels[:, idx, :]  # shape [n_workers, batch_size_data_per_worker, 1]
+
+        loss = (torch.sum(self.f(data, labels)) - torch.sum(self.f(dataw, labels))) / self.batch_size
+        loss.backward()
+
+    def compute_grads_w(self, ):
+        self.f.zero_grad()
+        loss = torch.sum(self.f(self.dataw, self.labels))
+        loss.backward()
+
+    def get_grad_w(self, ):
+        for xi in self.f.parameters():
+            w = xi.data.squeeze()
+            grad_w = xi.grad.data.squeeze()
+        return w, grad_w
+
+    def update_params_f(self, X):
+        for xi in self.f.parameters():
+            xi.data = X.detach().clone().unsqueeze(-1)
+
+    def update_params_f_w(self, w):
+        for xi in self.f.parameters():
+            xi.dataw = w.detach().clone().unsqueeze(-1)
+
+    def step(self, W):
+        if self.opt == 1:
+            n_inner_iters = self.n_inner_iters
+        else:
+            # Choose random x^{(t)} from n_inner_iters
+            n_inner_iters = np.random.randint(1, self.n_inner_iters + 1)
+            if type(n_inner_iters) is np.ndarray:
+                n_inner_iters = n_inner_iters.item()
+
+        samples = np.random.randint(0, self.p.m, (n_inner_iters, self.p.n_agent, self.batch_size))
+
+        u = self.x.copy()
+        v = self.s.copy()
+        for inner_iter in range(n_inner_iters):
+
+            u_last, u = u, (u - self.eta * v).dot(self.W_in)
+            self.comm_rounds += self.K_in
+
+            v += self.grad(u, j=samples[inner_iter]) - self.grad(u_last, j=samples[inner_iter])
+            v = v.dot(self.W_in)
+            self.comm_rounds += self.K_in
+
+            # if inner_iter < n_inner_iters - 1:
+            #     self.save_metrics(x=u)
+
+        self.x = u
+
+        self.s -= self.grad_last
+        self.grad_last = self.grad(self.x)
+        self.s += self.grad_last
+        self.s = self.s.dot(self.W_out)
+        self.comm_rounds += self.K_out
 
 
 class Continuized_optimizer:

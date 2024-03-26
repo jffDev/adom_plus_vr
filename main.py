@@ -148,7 +148,7 @@ def main(args):
         raise ValueError(
             "A list of times varying connected graphs and corresponding normalized Laplacian matrices should be given."
         )
-    if args.optimizer_name not in ["AccGT","BEERplusVR","ADOMplusVR", "ADOMplus", "DADAO", "MSDA", "Continuized"]:
+    if args.optimizer_name not in ["AccVRExtra", "AccGT","GT_SARAH","GTPAGE","ADOMplusVR", "ADOMplus", "DADAO", "MSDA", "Continuized"]:
         raise ValueError(
             "We support either one of ['ADOMplusVR','ADOMplus', 'DADAO', 'MSDA', 'Continuized'] optimizer."
         )
