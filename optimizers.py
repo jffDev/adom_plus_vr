@@ -322,10 +322,10 @@ class ADOMplus_optimizer(Optimizer):
         self.X = X
         self.grad_X_g = grad_X
 
-        self.X = torch.ones(X.shape).double()
-        self.M = torch.randn(X.shape).double()
-        self.Y = torch.randn(X.shape).double()
-        self.Z = torch.zeros(X.shape).double()
+        self.X = torch.ones(X.shape, dtype=torch.float64)
+        self.M = torch.randn(X.shape, dtype=torch.float64)
+        self.Y = torch.randn(X.shape, dtype=torch.float64)
+        self.Z = torch.zeros(X.shape, dtype=torch.float64)
 
         self.X_f = self.X
         self.Y_f = self.Y
@@ -428,6 +428,21 @@ class ADOMplusVR_optimizer(Optimizer):
         self.asynchronous = False
         self.initialize()
 
+    def compute_full_grads(self, ):
+        """
+        Compute the grads $\partial f_i / \partial x_i$
+        by performing a forward and backward pass with the loss
+        $f = \sum_i f_i$ in the syncrhonous regime, or with the loss
+        $f = f_i$ in the asynchronous one.
+        """
+        self.f.zero_grad()
+
+        data = self.data  # shape [n_workers, n_data_per_worker, dim]
+        labels = self.labels  # shape [n_workers, n_data_per_worker, 1]
+
+        loss = torch.sum(self.f(data, labels))
+        loss.backward()
+
     def compute_grads(self, ):
         """
         Compute the grads $\partial f_i / \partial x_i$
@@ -476,17 +491,20 @@ class ADOMplusVR_optimizer(Optimizer):
         n = self.data.shape[1]
         self.b = np.max([np.sqrt(n), n * np.sqrt(self.mu / self.L)])
         self.batch_size = np.int64(self.b)
-        self.compute_grads()
 
-        X, grad_X = self.get_grads()
-        self.X = X
-        self.grad_batch = grad_X
+        # print("self.b", self.b)
 
-        self.X = torch.ones(X.shape).double()
-        self.M = torch.randn(X.shape).double()
-        self.Y = torch.randn(X.shape).double()
-        self.Z = torch.zeros(X.shape).double()
-        self.w = torch.zeros(X.shape).double()
+        # self.compute_full_grads()
+        # X, grad_X = self.get_grads()
+        # self.X = X
+        # self.grad_batch = grad_X
+
+        self.X = torch.ones(self.data.shape[0], self.data.shape[2], dtype=torch.float64)
+        # self.X = torch.ones(X.shape,  dtype=torch.float64)
+        self.M = torch.randn(self.X.shape, dtype=torch.float64)
+        self.Y = torch.randn(self.X.shape, dtype=torch.float64)
+        self.Z = torch.zeros(self.X.shape, dtype=torch.float64)
+        self.w = torch.zeros(self.X.shape, dtype=torch.float64)
 
         self.X_f = self.X
         self.Y_f = self.Y
@@ -499,8 +517,8 @@ class ADOMplusVR_optimizer(Optimizer):
         self.tau_2 = np.min([1 / 2, np.max([1, np.sqrt(n) / b]) * np.sqrt(self.mu / self.L)])
         self.tau_1 = (1 - self.tau_0) / (1 / self.tau_2 + 1 / 2)
 
-        self.alpha = self.mu / 2
-        self.nu = self.mu / 2
+        self.alpha = 1/10 #self.mu
+        self.nu = self.mu / 4
 
         self.sigma_2 = np.sqrt(self.mu) / (16 * self.chi * np.sqrt(self.L))
         self.sigma_1 = 1 / (1 / self.sigma_2 + 1 / 2)
@@ -514,12 +532,15 @@ class ADOMplusVR_optimizer(Optimizer):
 
         self.theta = self.nu / (4 * self.sigma_2)
 
-        self.zeta = 1 / 2  # self.mu
+        self.zeta = 1 / 4  # self.mu
 
         self.Lambda = n / b * (1 / 2 + 1 / (b * self.tau_1))
 
-        self.p_1 = 1 / (4 * self.Lambda)
+        self.p_1 = 1 / (1 * self.Lambda)
         self.p_2 = 1 / (self.Lambda * b * self.tau_1)
+
+        # print("self.p_1", self.p_1)
+        # print("self.p_2", self.p_2)
 
         self.update_params_f_w(self.w)
         self.compute_grads_w()
@@ -602,7 +623,7 @@ class GTPAGE_optimizer(Optimizer):
     Implementation of the BEER+VR optimizer
     """
 
-    def __init__(self, f, data, labels, dataw, mu=1, L=1, chi=1, batch_size=10, ):
+    def __init__(self, f, data, labels, mu=1, L=1, chi=1, batch_size=10, ):
         super().__init__(f, data, labels)
         """"
         Parameters:
@@ -616,45 +637,33 @@ class GTPAGE_optimizer(Optimizer):
             - chi (float): for the matrices considers, equals \frac{\lambda_max}{\lambda_min^+}
                            of the graph's Laplacians, see page 4 of the paper.
         """
-        self.dataw = dataw
         self.L = L
-        self.n = self.data.shape[0]
-        self.batch_size = np.int64(np.sqrt(self.n) * self.L)
+        self.m = self.data.shape[0]
+        # print("self.data.shape[0]", self.data.shape)
+        self.n = self.data.shape[1]
+        # print("self.batch_size", self.batch_size)
         self.mu = mu
         self.chi = chi
         self.asynchronous = False
         self.f = f
+        self.r = -1
 
-        self.eta = 0.1
         self.initialize()
 
     def initialize(self, ):
-        self.I_n = torch.eye(self.n)
-        self.eta = 1e-2
-
-        self.compute_grads()
-        X, grad_X = self.get_grads()
-        self.X = X
+        self.X = torch.randn(self.data.shape[0], self.data.shape[2], dtype=torch.float64)
+        self.update_params_f(self.X)
+        self.compute_full_grads()
+        _, grad_X = self.get_grads()
+        # self.X = _#torch.ones(_.shape,  dtype=torch.float64)
         self.Y = grad_X
 
-        self.V = self.Y / self.n
+        self.eta = 1e-2
+        self.V = self.Y / self.m
+        self.batch_size = 50#np.int64(np.sqrt(self.n) * self.L)
         self.p = self.batch_size / (self.batch_size + self.n)
-        self.grad_previous = grad_X
-
-    def compute_grads(self, ):
-
-        self.f.zero_grad()
-
-        data = self.data  # shape [n_workers, n_data_per_worker, dim]
-        labels = self.labels  # shape [n_workers, n_data_per_worker, 1]
-
-        idx = np.random.randint(0, self.data.shape[1], self.batch_size)
-
-        data = data[:, idx, :]  # shape [n_workers, batch_size_data_per_worker, dim]
-        labels = labels[:, idx, :]  # shape [n_workers, batch_size_data_per_worker, 1]
-
-        loss = torch.sum(self.f(data, labels)) / self.batch_size
-        loss.backward()
+        # print("p",self.p)
+        # self.grad_previous = grad_X
 
     def update_params_f(self, X):
         """
@@ -689,29 +698,53 @@ class GTPAGE_optimizer(Optimizer):
         loss = torch.sum(self.f(data, labels))
         loss.backward()
 
-    def step(self, W):
+    def compute_grads_f(self, idx, X):
+        for xi in self.f.parameters():
+            xi.data = X.detach().clone().unsqueeze(-1)
 
+        self.f.zero_grad()
+
+        data = self.data[:, idx, :]  # shape [n_workers, batch_size_data_per_worker, dim]
+        labels = self.labels[:, idx, :]  # shape [n_workers, batch_size_data_per_worker, 1]
+
+        loss = torch.sum(self.f(data, labels)) / self.batch_size
+        loss.backward()
+
+    def compute_grads_f2(self, X):
+        for xi in self.f.parameters():
+            xi.data = X.detach().clone().unsqueeze(-1)
+        self.f.zero_grad()
+        loss = torch.sum(self.f(self.data, self.labels))
+        loss.backward()
+
+    def getIdx(self, ):
+        return np.random.randint(0, self.data.shape[1], self.batch_size)
+
+    def step(self, W):
         X_new = (torch.eye(W.shape[0]) - W) @ self.X - self.eta * self.V
 
-        self.update_params_f(X_new)
+        self.r = np.random.choice([0, 1], 1, p=[self.p, 1 - self.p])[0]
 
-        r = np.random.choice([0, 1], 1, p=[self.p, 1 - self.p])
-
-        if r[0] == 0:
+        if self.r == 0:
+            self.update_params_f(X_new)
             self.compute_full_grads()
             _, grad = self.get_grads()
             Y_new = grad
         else:
-            self.compute_grads()
-            _, grad = self.get_grads()
-            Y_new = self.Y + grad - self.grad_previous
+            idx = self.getIdx()
+            self.compute_grads_f(idx, X_new)
+            _, grads_x_new = self.get_grads()
+
+            self.compute_grads_f(idx, self.X)
+            _, grads_x = self.get_grads()
+
+            Y_new = self.Y + grads_x_new - grads_x
 
         V_new = (torch.eye(W.shape[0]) - W) @ self.V + Y_new - self.Y
 
-        self.grad_previous = grad
-        self.Y = Y_new
-        self.V = V_new
-        self.X = X_new
+        self.Y = Y_new.detach().clone()
+        self.V = V_new.detach().clone()
+        self.X = X_new.detach().clone()
 
 
 class GT_SARAH_optimizer(Optimizer):
@@ -746,9 +779,9 @@ class GT_SARAH_optimizer(Optimizer):
 
         # print(self.data.shape)
         # print("self.X.shape", self.X.shape)
-        self.v = torch.zeros((self.data.shape[0], self.data.shape[2])).double()
-        self.y = torch.zeros((self.data.shape[0], self.data.shape[2])).double()
-        self.X = torch.randn(self.data.shape[0], self.data.shape[2]).double()
+        self.v = torch.zeros((self.data.shape[0], self.data.shape[2]), dtype=torch.float64)
+        self.y = torch.zeros((self.data.shape[0], self.data.shape[2]), dtype=torch.float64)
+        self.X = torch.randn((self.data.shape[0], self.data.shape[2]), dtype=torch.float64)
 
     def compute_grads(self, ):
 
@@ -873,7 +906,7 @@ class AccGT_optimizer(Optimizer):
         X, grad = self.get_grads()
 
         # self.X = X
-        self.X = torch.ones(X.shape).double()
+        self.X = torch.ones(X.shape, dtype=torch.float64)
         self.Y = X
         self.Z = X
         self.s_previous = grad
@@ -933,16 +966,16 @@ class AccVRExtra_optimizer(Optimizer):
 
     def initialize(self, ):
         self.n = self.data.shape[0]
-        self.X = torch.ones(self.data.shape[0], self.data.shape[2]).double()
+        self.X = torch.ones(self.data.shape[0], self.data.shape[2], dtype=torch.float64)
 
         self.Z = self.X
         self.w = self.X
-        self.lam = torch.zeros(self.X.shape).double()
+        self.lam = torch.ones(self.X.shape, dtype=torch.float64)
 
-        self.alpha = 5e-3
+        self.alpha = 5e-2
         self.batch_size = np.int64(np.sqrt(self.n))
 
-        self.zeta_1 = 0.5
+        self.zeta_1 = 3e-1
         self.zeta_2 = self.L / (2 * self.batch_size)
 
         self.p = self.batch_size / self.n
@@ -994,7 +1027,7 @@ class AccVRExtra_optimizer(Optimizer):
 
     def step(self, W):
 
-        self.U = (torch.eye(W.shape[0]) - W)/2 #torch.sqrt(W / 2)
+        self.U = (torch.eye(W.shape[0]) - W) / 2 #torch.sqrt(W / 2)
         Y_new = self.zeta_1 * self.Z + self.zeta_2 * self.w + (1 - self.zeta_1 - self.zeta_2) * self.X
 
         self.update_params_f(Y_new)

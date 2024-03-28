@@ -23,6 +23,8 @@ from optimizers import (
     MSDA_optimizer,
 )
 
+torch.set_default_tensor_type(torch.DoubleTensor)
+
 def run_DADAO(
     n_workers,
     t_max,
@@ -380,13 +382,21 @@ def run_ADOMplusVR(
         # compute distance to optimal params
         with torch.no_grad():
             loss = compute_average_distance_to_opt(optimizer.X, x_star)
-            if optimizer.r != 2:
-                loss_list = (
-                    loss_list + [loss] * n_workers
-                )  # we take n gradients at each round
-                loss_list_edges = (
-                    loss_list_edges + [loss] * n_edges
-                )  # n_edges counted the total number of edges activated
+            # if optimizer.r != 2:
+            loss_list = (
+                loss_list + [loss] * n_workers
+            )  # we take n gradients at each round
+            loss_list_edges = (
+                loss_list_edges + [loss] * n_edges
+            )  # n_edges counted the total number of edges activated
+
+            # if optimizer.r != 2:
+            #     loss_list = (
+            #             loss_list + [loss] * n_workers
+            #     )  # we take n gradients at each round
+            #     loss_list_edges = (
+            #             loss_list_edges + [loss] * n_edges
+            #     )  # n_edges counted the total number of edges activated
         # regularly save the data from the runs
         # if k % 10000 == 0:
         #     save_data(
@@ -428,7 +438,7 @@ def run_GTPAGE(
         time_now,
         graph_type,
 ):
-    optimizer = GTPAGE_optimizer(f, data, labels, dataw=data,  mu=mu, L=L, chi=chi)
+    optimizer = GTPAGE_optimizer(f, data, labels, mu=mu, L=L, chi=chi)
     # Initialization of the optimization procedure
     k_mixing = 0
     In = torch.eye(n_workers).double()
@@ -447,7 +457,7 @@ def run_GTPAGE(
             optimizer.initialize()
     else:
         n_matrix = 1
-    # Run BEER+VR
+    # Run GT_PAGE
     for k in trange(n_steps):
         # compute the multi-consensus matrix
         W_final = torch.eye(n_workers).double()
@@ -458,12 +468,16 @@ def run_GTPAGE(
             G = list_G[k_mixing % len(list_G)]
             n_edges += len(G.edges)
             k_mixing += 1
+
+        if k == 0:
+            loss_list, loss_list_edges = loss_x_start(optimizer.X, x_star, loss_list, loss_list_edges, n_workers, n_edges)
+
         # take a gradient step
         optimizer.step(W_final)
         # compute distance to optimal params
         with torch.no_grad():
             loss = compute_average_distance_to_opt(optimizer.X, x_star)
-
+            # if optimizer.r == 0:
             loss_list = (
                     loss_list + [loss] * n_workers
             )  # we take n gradients at each round
@@ -507,7 +521,7 @@ def run_GT_SARAH(
             optimizer.initialize()
     else:
         n_matrix = 1
-    # Run BEER+VR
+    # Run GT_SARAH
     for k in trange(n_steps):
         # compute the multi-consensus matrix
         W_final = torch.eye(n_workers).double()
@@ -647,13 +661,13 @@ def run_AccVRExtra(
         # compute distance to optimal params
         with torch.no_grad():
             loss = compute_average_distance_to_opt(optimizer.X, x_star)
-            if optimizer.r == 0:
-                loss_list = (
-                        loss_list + [loss] * n_workers
-                )  # we take n gradients at each round
-                loss_list_edges = (
-                        loss_list_edges + [loss] * n_edges
-                )  # n_edges counted the total number of edges activated
+            # if optimizer.r == 0:
+            loss_list = (
+                    loss_list + [loss] * n_workers
+            )  # we take n gradients at each round
+            loss_list_edges = (
+                    loss_list_edges + [loss] * n_edges
+            )  # n_edges counted the total number of edges activated
     return optimizer, loss_list, loss_list_edges
 
 def loss_x_start(x, x_star, loss_list, loss_list_edges, n_workers, n_edges):
@@ -874,6 +888,7 @@ def run_optimizer(args, f, x_star, time_now):
     """
     Helper to the main function to run the right optimizer from the arguments passed.
     """
+
     optimizer, loss_list, loss_list_edges = None, None, None
     if args.optimizer_name == "DADAO":
         optimizer, loss_list, loss_list_edges = run_DADAO(

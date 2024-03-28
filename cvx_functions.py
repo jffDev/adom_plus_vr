@@ -39,16 +39,18 @@ class logistic_regression(nn.Module):
             # if centralized, we use one set of parameters: all the workers
             # share the same parameters. theta_i of shape [1, dim, 1]
             self.theta_i = nn.Parameter(
-                torch.randn((1, dim, 1)).double(), requires_grad=True
+                torch.randn((1, dim, 1),  dtype=torch.float64), requires_grad=True
             )
         else:
             # if decentralized, we have one different set of parameters for each worker.
             # theta_i of shape [n_workers, dim, 1]
             self.theta_i = nn.Parameter(
-                torch.randn((n_workers, dim, 1)).double(), requires_grad=True
+                torch.randn((n_workers, dim, 1),  dtype=torch.float64), requires_grad=True
             )
 
     def forward(self, X, y):
+
+        # print("self.theta_i", self.theta_i.shape)
         """
         Apply the functions f_i(\theta, X, y) and returns the collection of n_workers scalars.
         
@@ -67,7 +69,6 @@ class logistic_regression(nn.Module):
                 X, self.theta_i
             )  # out of shape [n_workers, n_data_per_worker, 1]
         else:
-
             out = torch.bmm(
                 X, self.theta_i
             )  # out of shape [n_workers, n_data_per_worker, 1]
@@ -78,8 +79,9 @@ class logistic_regression(nn.Module):
         # mean over the data in each worker
         out = torch.sum(out, dim=1) / self.n_data
         # add the regularizer
-        out = out + (self.mu / 2) * torch.linalg.norm(self.theta_i, dim=1) ** 2
-
+        out = out + (self.mu / 2) * (self.theta_i**2).sum(dim=1)#torch.linalg.norm(self.theta_i, dim=1) ** 2
+        # print("out shape", out.shape)
+        # print("out", out)
         return out
 
 
