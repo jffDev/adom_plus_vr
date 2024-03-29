@@ -494,11 +494,6 @@ class ADOMplusVR_optimizer(Optimizer):
 
         # print("self.b", self.b)
 
-        # self.compute_full_grads()
-        # X, grad_X = self.get_grads()
-        # self.X = X
-        # self.grad_batch = grad_X
-
         self.X = torch.ones(self.data.shape[0], self.data.shape[2], dtype=torch.float64)
         # self.X = torch.ones(X.shape,  dtype=torch.float64)
         self.M = torch.randn(self.X.shape, dtype=torch.float64)
@@ -517,8 +512,8 @@ class ADOMplusVR_optimizer(Optimizer):
         self.tau_2 = np.min([1 / 2, np.max([1, np.sqrt(n) / b]) * np.sqrt(self.mu / self.L)])
         self.tau_1 = (1 - self.tau_0) / (1 / self.tau_2 + 1 / 2)
 
-        self.alpha = 1/10 #self.mu
-        self.nu = self.mu / 4
+        self.alpha = self.mu / 2
+        self.nu = self.mu / 2
 
         self.sigma_2 = np.sqrt(self.mu) / (16 * self.chi * np.sqrt(self.L))
         self.sigma_1 = 1 / (1 / self.sigma_2 + 1 / 2)
@@ -532,15 +527,15 @@ class ADOMplusVR_optimizer(Optimizer):
 
         self.theta = self.nu / (4 * self.sigma_2)
 
-        self.zeta = 1 / 4  # self.mu
+        self.zeta = 1 / 2  # self.mu
 
         self.Lambda = n / b * (1 / 2 + 1 / (b * self.tau_1))
 
-        self.p_1 = 1 / (1 * self.Lambda)
+        self.p_1 = 1 / (2 * self.Lambda)
         self.p_2 = 1 / (self.Lambda * b * self.tau_1)
 
-        # print("self.p_1", self.p_1)
-        # print("self.p_2", self.p_2)
+        print("self.p_1", self.p_1)
+        print("self.p_2", self.p_2)
 
         self.update_params_f_w(self.w)
         self.compute_grads_w()
@@ -972,10 +967,10 @@ class AccVRExtra_optimizer(Optimizer):
         self.w = self.X
         self.lam = torch.ones(self.X.shape, dtype=torch.float64)
 
-        self.alpha = 5e-2
+        self.alpha = 3e-2
         self.batch_size = np.int64(np.sqrt(self.n))
 
-        self.zeta_1 = 3e-1
+        self.zeta_1 = 2e-2#1e-1
         self.zeta_2 = self.L / (2 * self.batch_size)
 
         self.p = self.batch_size / self.n
@@ -1227,7 +1222,7 @@ class Continuized_optimizer:
     The method is described in page 30-32 of Even et al https://arxiv.org/pdf/2106.07644.pdf
     Note that we corrected a small typo in equation (63) for the method to effectively work
     (the factor 2 should be at the numerator and not the denominator.)
-    
+
     We only implemented the method for the decentralized linear regression case.
     """
 
@@ -1342,7 +1337,7 @@ class MSDA_optimizer:
     Implementation of the Multi-Step Dual Accelerated (MSDA) method
     from Scaman et al https://arxiv.org/pdf/1702.08704.pdf,
     described in their Algorithm 2.
-    
+
     We implemented the method for the Linear Regression task only.
     """
 

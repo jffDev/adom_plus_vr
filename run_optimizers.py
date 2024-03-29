@@ -9,6 +9,7 @@ from utils import (
 )
 import optimizers
 import importlib
+
 importlib.reload(optimizers)
 
 from optimizers import (
@@ -23,31 +24,30 @@ from optimizers import (
     MSDA_optimizer,
 )
 
-torch.set_default_tensor_type(torch.DoubleTensor)
 
 def run_DADAO(
-    n_workers,
-    t_max,
-    lamb_grad,
-    lamb_mix,
-    chi_1,
-    f,
-    mu,
-    L,
-    data,
-    labels,
-    x_star,
-    list_G,
-    stochastic,
-    batch_size,
-    time_now,
-    graph_type,
+        n_workers,
+        t_max,
+        lamb_grad,
+        lamb_mix,
+        chi_1,
+        f,
+        mu,
+        L,
+        data,
+        labels,
+        x_star,
+        list_G,
+        stochastic,
+        batch_size,
+        time_now,
+        graph_type,
 ):
     """
     Run our asynchronous decentralized optimizer procedure by simulating in advance
     a sequence of random events corresponding either to one gradient step
     on one node or a communication along an edge.
-    
+
     Parameters:
         - n_workers (int): the number of workers
         - t_max (float): the duration of the run
@@ -73,7 +73,7 @@ def run_DADAO(
         - batch_size (int): if stochastic, the size of the minibatch to use.
         - time_now (str): the time of the run (only used to name the file storing the run's data.)
         - graph_type (str): the nature of the graphs.
-        
+
     Returns:
         - optimizer (DADAO optimizer): the optimizer object.
         - loss_list (list): the evolution of the average distance to x^*
@@ -181,24 +181,24 @@ def run_DADAO(
 
 
 def run_ADOMplus(
-    n_workers,
-    n_steps,
-    chi,
-    f,
-    mu,
-    L,
-    data,
-    labels,
-    x_star,
-    list_G,
-    list_W,
-    use_multi_consensus,
-    time_now,
-    graph_type,
+        n_workers,
+        n_steps,
+        chi,
+        f,
+        mu,
+        L,
+        data,
+        labels,
+        x_star,
+        list_G,
+        list_W,
+        use_multi_consensus,
+        time_now,
+        graph_type,
 ):
     """
     Run the ADOM+ optimizer (see Kovalev et al. https://openreview.net/forum?id=L8-54wkift )
-    
+
     Parameters:
         - n_workers (int): the number of workers
         - n_steps (int): the number of synchronized gradient steps to perform.
@@ -218,7 +218,7 @@ def run_ADOMplus(
         - use_multi_consensus (bool): whether or not use the multi consensus inner loop.
         - time_now (str): the time of the run (only used to name the file storing the run's data.)
         - graph_type (str): the nature of the graphs.
-        
+
     Returns:
         - optimizer (ADOM+ optimizer): the optimizer object.
         - loss_list (list): the evolution of the average distance to x^*
@@ -257,20 +257,22 @@ def run_ADOMplus(
             G = list_G[k_mixing % len(list_G)]
             n_edges += len(G.edges)
             k_mixing += 1
-
         if k == 0:
-            loss_list, loss_list_edges = loss_x_start(optimizer.X, x_star, loss_list, loss_list_edges, n_workers, n_edges)
+            loss_list, loss_list_edges, n_epochs = loss_x_start(
+                optimizer.X, x_star, loss_list, loss_list_edges, n_workers, n_edges
+            )
         # take a gradient step
         optimizer.step(W_final)
         # compute distance to optimal params
         with torch.no_grad():
             loss = compute_average_distance_to_opt(optimizer.X, x_star)
             loss_list = (
-                loss_list + [loss] * n_workers
+                    loss_list + [loss] * n_workers
             )  # we take n gradients at each round
             loss_list_edges = (
-                loss_list_edges + [loss] * n_edges
+                    loss_list_edges + [loss] * n_edges
             )  # n_edges counted the total number of edges activated
+            n_epochs.append(n_epochs[-1] + 1)
         # regularly save the data from the runs
         # if k % 10000 == 0:
         #     save_data(
@@ -294,23 +296,24 @@ def run_ADOMplus(
         #         is_loss_comp=False,
         #     )
 
-    return optimizer, loss_list, loss_list_edges
+    return optimizer, loss_list, loss_list_edges, n_epochs
+
 
 def run_ADOMplusVR(
-    n_workers,
-    n_steps,
-    chi,
-    f,
-    mu,
-    L,
-    data,
-    labels,
-    x_star,
-    list_G,
-    list_W,
-    use_multi_consensus,
-    time_now,
-    graph_type,
+        n_workers,
+        n_steps,
+        chi,
+        f,
+        mu,
+        L,
+        data,
+        labels,
+        x_star,
+        list_G,
+        list_W,
+        use_multi_consensus,
+        time_now,
+        graph_type,
 ):
     """
     Run the ADOM+VR optimizer
@@ -343,7 +346,7 @@ def run_ADOMplusVR(
                                   at each individual communication.
     """
 
-    optimizer = ADOMplusVR_optimizer(f, data, labels, dataw=data,  mu=mu, L=L, chi=chi)
+    optimizer = ADOMplusVR_optimizer(f, data, labels, dataw=data, mu=mu, L=L, chi=chi)
     # Initialization of the optimization procedure
     k_mixing = 0
     In = torch.eye(n_workers).double()
@@ -376,27 +379,26 @@ def run_ADOMplusVR(
             k_mixing += 1
 
         if k == 0:
-            loss_list, loss_list_edges = loss_x_start(optimizer.X, x_star, loss_list, loss_list_edges, n_workers, n_edges)
+            loss_list, loss_list_edges, n_epochs = loss_x_start(
+                optimizer.X, x_star, loss_list, loss_list_edges, n_workers, n_edges
+            )
         # take a gradient step
         optimizer.step(W_final)
         # compute distance to optimal params
         with torch.no_grad():
             loss = compute_average_distance_to_opt(optimizer.X, x_star)
-            # if optimizer.r != 2:
             loss_list = (
-                loss_list + [loss] * n_workers
+                    loss_list + [loss] * n_workers
             )  # we take n gradients at each round
             loss_list_edges = (
-                loss_list_edges + [loss] * n_edges
+                    loss_list_edges + [loss] * n_edges
             )  # n_edges counted the total number of edges activated
-
-            # if optimizer.r != 2:
-            #     loss_list = (
-            #             loss_list + [loss] * n_workers
-            #     )  # we take n gradients at each round
-            #     loss_list_edges = (
-            #             loss_list_edges + [loss] * n_edges
-            #     )  # n_edges counted the total number of edges activated
+            if optimizer.r != 2:
+                n_epochs.append(n_epochs[-1] + 1)
+            else:
+                n_epochs.append(
+                    n_epochs[-1] + optimizer.batch_size / optimizer.data.shape[1]
+                )
         # regularly save the data from the runs
         # if k % 10000 == 0:
         #     save_data(
@@ -420,7 +422,8 @@ def run_ADOMplusVR(
         #         is_loss_comp=False,
         #     )
 
-    return optimizer, loss_list, loss_list_edges
+    return optimizer, loss_list, loss_list_edges, n_epochs
+
 
 def run_GTPAGE(
         n_workers,
@@ -438,7 +441,7 @@ def run_GTPAGE(
         time_now,
         graph_type,
 ):
-    optimizer = GTPAGE_optimizer(f, data, labels, mu=mu, L=L, chi=chi)
+    optimizer = GTPAGE_optimizer(f, data, labels, dataw=data, mu=mu, L=L, chi=chi)
     # Initialization of the optimization procedure
     k_mixing = 0
     In = torch.eye(n_workers).double()
@@ -457,7 +460,7 @@ def run_GTPAGE(
             optimizer.initialize()
     else:
         n_matrix = 1
-    # Run GT_PAGE
+    # Run BEER+VR
     for k in trange(n_steps):
         # compute the multi-consensus matrix
         W_final = torch.eye(n_workers).double()
@@ -468,16 +471,12 @@ def run_GTPAGE(
             G = list_G[k_mixing % len(list_G)]
             n_edges += len(G.edges)
             k_mixing += 1
-
-        if k == 0:
-            loss_list, loss_list_edges = loss_x_start(optimizer.X, x_star, loss_list, loss_list_edges, n_workers, n_edges)
-
         # take a gradient step
         optimizer.step(W_final)
         # compute distance to optimal params
         with torch.no_grad():
             loss = compute_average_distance_to_opt(optimizer.X, x_star)
-            # if optimizer.r == 0:
+
             loss_list = (
                     loss_list + [loss] * n_workers
             )  # we take n gradients at each round
@@ -485,6 +484,7 @@ def run_GTPAGE(
                     loss_list_edges + [loss] * n_edges
             )  # n_edges counted the total number of edges activated
     return optimizer, loss_list, loss_list_edges
+
 
 def run_GT_SARAH(
         n_workers,
@@ -502,7 +502,7 @@ def run_GT_SARAH(
         time_now,
         graph_type,
 ):
-    optimizer = GT_SARAH_optimizer(f, data, labels, dataw=data,  mu=mu, L=L, chi=chi)
+    optimizer = GT_SARAH_optimizer(f, data, labels, dataw=data, mu=mu, L=L, chi=chi)
     # Initialization of the optimization procedure
     k_mixing = 0
     In = torch.eye(n_workers).double()
@@ -521,7 +521,7 @@ def run_GT_SARAH(
             optimizer.initialize()
     else:
         n_matrix = 1
-    # Run GT_SARAH
+    # Run BEER+VR
     for k in trange(n_steps):
         # compute the multi-consensus matrix
         W_final = torch.eye(n_workers).double()
@@ -544,6 +544,7 @@ def run_GT_SARAH(
                     loss_list_edges + [loss] * n_edges
             )  # n_edges counted the total number of edges activated
     return optimizer, loss_list, loss_list_edges
+
 
 def run_AccGT(
         n_workers,
@@ -561,7 +562,7 @@ def run_AccGT(
         time_now,
         graph_type,
 ):
-    optimizer = AccGT_optimizer(f, data, labels, dataw=data,  mu=mu, L=L, chi=chi)
+    optimizer = AccGT_optimizer(f, data, labels, dataw=data, mu=mu, L=L, chi=chi)
     # Initialization of the optimization procedure
     k_mixing = 0
     In = torch.eye(n_workers).double()
@@ -593,7 +594,9 @@ def run_AccGT(
             k_mixing += 1
 
         if k == 0:
-            loss_list, loss_list_edges = loss_x_start(optimizer.X, x_star, loss_list, loss_list_edges, n_workers, n_edges)
+            loss_list, loss_list_edges, n_epochs = loss_x_start(
+                optimizer.X, x_star, loss_list, loss_list_edges, n_workers, n_edges
+            )
         # take a gradient step
         optimizer.step(W_final)
         # compute distance to optimal params
@@ -605,7 +608,9 @@ def run_AccGT(
             loss_list_edges = (
                     loss_list_edges + [loss] * n_edges
             )  # n_edges counted the total number of edges activated
-    return optimizer, loss_list, loss_list_edges
+            n_epochs.append(n_epochs[-1] + 1)
+    return optimizer, loss_list, loss_list_edges, n_epochs
+
 
 def run_AccVRExtra(
         n_workers,
@@ -623,7 +628,7 @@ def run_AccVRExtra(
         time_now,
         graph_type,
 ):
-    optimizer = AccVRExtra_optimizer(f, data, labels, dataw=data,  mu=mu, L=L, chi=chi)
+    optimizer = AccVRExtra_optimizer(f, data, labels, dataw=data, mu=mu, L=L, chi=chi)
     # Initialization of the optimization procedure
     k_mixing = 0
     In = torch.eye(n_workers).double()
@@ -655,50 +660,58 @@ def run_AccVRExtra(
             k_mixing += 1
 
         if k == 0:
-            loss_list, loss_list_edges = loss_x_start(optimizer.X, x_star, loss_list, loss_list_edges, n_workers, n_edges)
+            loss_list, loss_list_edges, n_epochs = loss_x_start(
+                optimizer.X, x_star, loss_list, loss_list_edges, n_workers, n_edges
+            )
         # take a gradient step
         optimizer.step(W_final)
         # compute distance to optimal params
         with torch.no_grad():
             loss = compute_average_distance_to_opt(optimizer.X, x_star)
-            # if optimizer.r == 0:
             loss_list = (
                     loss_list + [loss] * n_workers
             )  # we take n gradients at each round
             loss_list_edges = (
                     loss_list_edges + [loss] * n_edges
             )  # n_edges counted the total number of edges activated
-    return optimizer, loss_list, loss_list_edges
+            if optimizer.r == 0:
+                n_epochs.append(n_epochs[-1] + 1)
+            else:
+                n_epochs.append(
+                    n_epochs[-1] + optimizer.batch_size / optimizer.data.shape[1]
+                )
+    return optimizer, loss_list, loss_list_edges, n_epochs
+
 
 def loss_x_start(x, x_star, loss_list, loss_list_edges, n_workers, n_edges):
     loss = compute_average_distance_to_opt(x, x_star)
-    loss_list = (
-            loss_list + [loss] * n_workers
-    )  # we take n gradients at each round
+    loss_list = loss_list + [loss] * n_workers  # we take n gradients at each round
     loss_list_edges = (
             loss_list_edges + [loss] * n_edges
     )  # n_edges counted the total number of edges activated
-    return loss_list, loss_list_edges
+    n_epochs = [0.0]
+    return loss_list, loss_list_edges, n_epochs
+
 
 def run_continuized(
-    n_workers,
-    t_max,
-    f,
-    mu,
-    L,
-    mu_gossip,
-    chi_2,
-    data,
-    labels,
-    x_star,
-    list_G,
-    time_now,
-    graph_type,
+        n_workers,
+        t_max,
+        f,
+        mu,
+        L,
+        mu_gossip,
+        chi_2,
+        data,
+        labels,
+        x_star,
+        list_G,
+        time_now,
+        graph_type,
 ):
     """
     Run the Continuized optimizer of Event et al. https://arxiv.org/pdf/2106.07644.pdf,
     in the case of decentralized optimization (Appendix H., page 30)
-    
+
     Parameters:
         - n_workers (int): the number of workers.
         - t_max (float): the duration of the run.
@@ -717,7 +730,7 @@ def run_continuized(
         - list_G (list): the list of time-varying graphs on which we cycle through.
         - time_now (str): the time of the run (only used to name the file storing the run's data.)
         - graph_type (str): the nature of the graphs.
-        
+
     Returns:
         - optimizer (ADOM+ optimizer): the optimizer object.
         - loss_list (list): the evolution of the average distance to x^*
@@ -773,7 +786,7 @@ def run_continuized(
             loss = compute_average_distance_to_opt(X, x_star)
             loss_list_edges.append(loss)
             loss_list = (
-                loss_list + [loss] * 2
+                    loss_list + [loss] * 2
             )  # we take 2 gradient steps for each communication
         # regularly save the data from the runs
         if k % 10000 == 0:
@@ -802,12 +815,12 @@ def run_continuized(
 
 
 def run_MSDA(
-    n_workers, n_steps, f, mu, L, data, labels, x_star, list_G, time_now, graph_type
+        n_workers, n_steps, f, mu, L, data, labels, x_star, list_G, time_now, graph_type
 ):
     """
     Run the Multi-Step Dual Accelerated (MSDA) method
     from Scaman et al https://arxiv.org/pdf/1702.08704.pdf
-    
+
     Parameters:
         - n_workers (int): the number of workers.
         - n_steps (int): the number of synchronized gradient steps to perform.
@@ -824,7 +837,7 @@ def run_MSDA(
         - list_G (list): the list of time-varying graphs on which we cycle through.
         - time_now (str): the time of the run (only used to name the file storing the run's data.)
         - graph_type (str): the nature of the graphs.
-        
+
     Returns:
         - optimizer (ADOM+ optimizer): the optimizer object.
         - loss_list (list): the evolution of the average distance to x^*
@@ -856,7 +869,7 @@ def run_MSDA(
             loss = compute_average_distance_to_opt(X, x_star)
             loss_list_edges = loss_list_edges + [loss] * n_edges_fired
             loss_list = (
-                loss_list + [loss] * n_workers
+                    loss_list + [loss] * n_workers
             )  # we take n gradient steps for one iteration
         # regularly save the data from the runs
         if k % 10000 == 0:
@@ -888,7 +901,6 @@ def run_optimizer(args, f, x_star, time_now):
     """
     Helper to the main function to run the right optimizer from the arguments passed.
     """
-
     optimizer, loss_list, loss_list_edges = None, None, None
     if args.optimizer_name == "DADAO":
         optimizer, loss_list, loss_list_edges = run_DADAO(
@@ -910,7 +922,7 @@ def run_optimizer(args, f, x_star, time_now):
             args.graph_type,
         )
     elif args.optimizer_name == "ADOMplus":
-        optimizer, loss_list, loss_list_edges = run_ADOMplus(
+        optimizer, loss_list, loss_list_edges, n_epochs = run_ADOMplus(
             args.n_workers,
             int(args.steps),
             args.chi,
@@ -927,7 +939,7 @@ def run_optimizer(args, f, x_star, time_now):
             args.graph_type,
         )
     elif args.optimizer_name == "ADOMplusVR":
-        optimizer, loss_list, loss_list_edges = run_ADOMplusVR(
+        optimizer, loss_list, loss_list_edges, n_epochs = run_ADOMplusVR(
             args.n_workers,
             int(args.steps),
             args.chi,
@@ -978,7 +990,7 @@ def run_optimizer(args, f, x_star, time_now):
             args.graph_type,
         )
     elif args.optimizer_name == "AccGT":
-        optimizer, loss_list, loss_list_edges = run_AccGT(
+        optimizer, loss_list, loss_list_edges, n_epochs = run_AccGT(
             args.n_workers,
             int(args.steps),
             args.chi,
@@ -995,7 +1007,7 @@ def run_optimizer(args, f, x_star, time_now):
             args.graph_type,
         )
     elif args.optimizer_name == "AccVRExtra":
-        optimizer, loss_list, loss_list_edges = run_AccVRExtra(
+        optimizer, loss_list, loss_list_edges, n_epochs = run_AccVRExtra(
             args.n_workers,
             int(args.steps),
             args.chi,
@@ -1043,7 +1055,7 @@ def run_optimizer(args, f, x_star, time_now):
             args.list_G,
             time_now,
             args.graph_type,
-        )
+            )
     elif args.optimizer_name == "MSDA":
         optimizer, loss_list, loss_list_edges = run_MSDA(
             args.n_workers,
@@ -1058,4 +1070,4 @@ def run_optimizer(args, f, x_star, time_now):
             time_now,
             args.graph_type,
         )
-    return optimizer, loss_list, loss_list_edges
+    return optimizer, loss_list, loss_list_edges, n_epochs

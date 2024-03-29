@@ -7,11 +7,13 @@ import torch.nn as nn
 from sklearn.linear_model import LogisticRegression
 import cvx_functions
 import importlib
+
 importlib.reload(cvx_functions)
 from cvx_functions import logistic_regression, linear_regression
 from utils import save_data, compute_regularity_constants, dual_grad_linear_regression
 import run_optimizers
 import importlib
+
 importlib.reload(run_optimizers)
 from run_optimizers import run_optimizer
 from data import create_data, create_K_graphs
@@ -148,7 +150,17 @@ def main(args):
         raise ValueError(
             "A list of times varying connected graphs and corresponding normalized Laplacian matrices should be given."
         )
-    if args.optimizer_name not in ["AccVRExtra", "AccGT","GT_SARAH","GTPAGE","ADOMplusVR", "ADOMplus", "DADAO", "MSDA", "Continuized"]:
+    if args.optimizer_name not in [
+        "AccVRExtra",
+        "AccGT",
+        "GT_SARAH",
+        "GTPAGE",
+        "ADOMplusVR",
+        "ADOMplus",
+        "DADAO",
+        "MSDA",
+        "Continuized",
+    ]:
         raise ValueError(
             "We support either one of ['ADOMplusVR','ADOMplus', 'DADAO', 'MSDA', 'Continuized'] optimizer."
         )
@@ -157,8 +169,8 @@ def main(args):
             " For MSDA and the Continuized framework, we only support the Linear Regression task."
         )
     if (
-        args.optimizer_name in ["MSDA", "Continuized"]
-        and args.graph_type == "random_geom"
+            args.optimizer_name in ["MSDA", "Continuized"]
+            and args.graph_type == "random_geom"
     ):
         raise ValueError(
             " For MSDA and the Continuized framework, we do not support time-varying graphs."
@@ -176,7 +188,6 @@ def main(args):
         # Initialize the function
         # print("args.n_workers", args.n_workers)
         f = linear_regression(args.dim, args.n_workers, args.data.shape[1])
-
 
     # COMPUTE THE TRUE OPTIMAL VALUE WITH SKLEARN
     data_sklearn = torch.cat([args.data[k] for k in range(args.data.shape[0])]).numpy()
@@ -202,18 +213,19 @@ def main(args):
         [
             str(time_part)
             for time_part in [
-                time.year,
-                time.month,
-                time.day,
-                time.hour,
-                time.minute,
-                time.second,
-            ]
+            time.year,
+            time.month,
+            time.day,
+            time.hour,
+            time.minute,
+            time.second,
+        ]
         ]
     )
     # RUN THE DECENTRALIZED OPTIMIZER
-    optimizer, loss_list, loss_list_edges = run_optimizer(args, f, x_star, time_now)
-
+    optimizer, loss_list, loss_list_edges, n_epochs = run_optimizer(
+        args, f, x_star, time_now
+    )
 
     # # SAVES THE DATA FROM THE RUN
     # save_data(
@@ -268,7 +280,7 @@ def main(args):
             "        | ",
             "f(x_bar) %s : " % args.optimizer_name,
             np.float64(torch.mean(f(args.data, args.labels)).detach()),
-        )
+            )
         # print(
         #     "x_star sklearn : ",
         #     x_star,
@@ -277,7 +289,7 @@ def main(args):
         #     X_bar.numpy(),
         # )
 
-    return optimizer, loss_list, loss_list_edges
+    return optimizer, loss_list, loss_list_edges, n_epochs
 
 
 if __name__ == "__main__":
@@ -295,8 +307,8 @@ if __name__ == "__main__":
         args.mu, args.L = compute_regularity_constants(args.data, args.classification)
     if args.list_G is None or args.list_W is None:
         # create a sequence of time varying connected graphs
-        args.list_G, args.list_W, list_L_norm, args.chi_1, args.chi_2, args.chi = create_K_graphs(
-            args.n_workers, args.graph_type, radius=args.radius, K=50
+        args.list_G, args.list_W, list_L_norm, args.chi_1, args.chi_2, args.chi = (
+            create_K_graphs(args.n_workers, args.graph_type, radius=args.radius, K=50)
         )
         # compute the right intensity value for the mixing process
         args.lamb_mix = np.sqrt(2 * args.chi_1 * args.chi_2)
